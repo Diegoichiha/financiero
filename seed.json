@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "config": {
+    "incluirCuotaCarro": true,
+    "presupuestos": { "recurrente": 0, "variable": 0, "hormiga": 0 },
+    "tope": 0
+  },
+  "centros": [
+    { "id": "hogar", "nombre": "Hogar" },
+    { "id": "brisas", "nombre": "Brisas (mamá)" }
+  ],
+  "medios": ["Efectivo", "Débito", "TC Rappi", "Transferencia", "Otro"],
+  "categorias": [
+    { "id": "vivienda", "nombre": "Vivienda", "tipo": "recurrente" },
+    { "id": "servicios", "nombre": "Servicios y telefonía", "tipo": "recurrente" },
+    { "id": "suscripciones", "nombre": "Suscripciones", "tipo": "recurrente" },
+    { "id": "seguros", "nombre": "Seguros", "tipo": "recurrente" },
+    { "id": "bienestar", "nombre": "Gimnasio y bienestar", "tipo": "recurrente" },
+    { "id": "domestico", "nombre": "Servicio doméstico", "tipo": "recurrente" },
+    { "id": "deudas", "nombre": "Deudas y tarjetas", "tipo": "recurrente" },
+    { "id": "carro", "nombre": "Cuota carro", "tipo": "recurrente" },
+    { "id": "mercado", "nombre": "Mercado", "tipo": "variable" },
+    { "id": "transporte", "nombre": "Gasolina y transporte", "tipo": "variable" },
+    { "id": "mascota", "nombre": "Mascota", "tipo": "variable" },
+    { "id": "cuidado", "nombre": "Cuidado personal", "tipo": "variable" },
+    { "id": "vehiculo", "nombre": "Lavado y carro", "tipo": "variable" },
+    { "id": "salud", "nombre": "Salud", "tipo": "variable" },
+    { "id": "hogar-var", "nombre": "Hogar y ropa", "tipo": "variable" },
+    { "id": "otros-var", "nombre": "Otros variables", "tipo": "variable" },
+    { "id": "domicilios", "nombre": "Domicilios (Rappi)", "tipo": "hormiga" },
+    { "id": "salidas", "nombre": "Salidas", "tipo": "hormiga" },
+    { "id": "comida-rapida", "nombre": "Comida rápida", "tipo": "hormiga" },
+    { "id": "cafe", "nombre": "Café y snacks", "tipo": "hormiga" },
+    { "id": "antojos", "nombre": "Antojos y otros", "tipo": "hormiga" }
+  ],
+  "cuentas": [
+    { "id": "c-emcali", "proveedor": "EMCALI", "referencia": "47090495", "centro": "hogar", "nota": "" },
+    { "id": "c-emcali-brisas", "proveedor": "EMCALI Brisas", "referencia": "1158024", "centro": "brisas", "nota": "" },
+    { "id": "c-gases", "proveedor": "Gases de Occidente", "referencia": "2554101", "centro": "hogar", "nota": "" },
+    { "id": "c-claro", "proveedor": "Claro", "referencia": "65350189", "centro": "hogar", "nota": "No. de cuenta" }
+  ],
+  "plantillas": [
+    { "id": "p-arriendo", "concepto": "Arriendo", "monto": 1067000, "dia": null, "categoria": "vivienda", "centro": "hogar", "cuenta": "" },
+    { "id": "p-emcali", "concepto": "EMCALI", "monto": 75000, "dia": null, "categoria": "servicios", "centro": "hogar", "cuenta": "c-emcali" },
+    { "id": "p-energia", "concepto": "Energía", "monto": 130000, "dia": null, "categoria": "servicios", "centro": "hogar", "cuenta": "" },
+    { "id": "p-gas", "concepto": "Gas", "monto": 35000, "dia": null, "categoria": "servicios", "centro": "hogar", "cuenta": "c-gases" },
+    { "id": "p-claro", "concepto": "Claro", "monto": 9900, "dia": null, "categoria": "servicios", "centro": "hogar", "cuenta": "c-claro" },
+    { "id": "p-movistar", "concepto": "Movistar", "monto": 70000, "dia": null, "categoria": "servicios", "centro": "hogar", "cuenta": "" },
+    { "id": "p-movistar-cel", "concepto": "Movistar celular", "monto": 64000, "dia": null, "categoria": "servicios", "centro": "hogar", "cuenta": "" },
+    { "id": "p-adobe", "concepto": "Adobe Suite", "monto": 93058, "dia": null, "categoria": "suscripciones", "centro": "hogar", "cuenta": "" },
+    { "id": "p-netflix", "concepto": "Netflix", "monto": 56000, "dia": null, "categoria": "suscripciones", "centro": "hogar", "cuenta": "" },
+    { "id": "p-spotify", "concepto": "Spotify", "monto": 25000, "dia": null, "categoria": "suscripciones", "centro": "hogar", "cuenta": "" },
+    { "id": "p-rappi", "concepto": "Rappi (suscripción)", "monto": 25000, "dia": null, "categoria": "suscripciones", "centro": "hogar", "cuenta": "" },
+    { "id": "p-crunchyroll", "concepto": "Crunchyroll", "monto": 20000, "dia": null, "categoria": "suscripciones", "centro": "hogar", "cuenta": "" },
+    { "id": "p-chatgpt", "concepto": "ChatGPT", "monto": 20000, "dia": null, "categoria": "suscripciones", "centro": "hogar", "cuenta": "" },
+    { "id": "p-smartfit", "concepto": "Smart FIT", "monto": 90000, "dia": null, "categoria": "bienestar", "centro": "hogar", "cuenta": "" },
+    { "id": "p-seguro", "concepto": "Cuota seguro", "monto": 270000, "dia": null, "categoria": "seguros", "centro": "hogar", "cuenta": "" },
+    { "id": "p-ingrid", "concepto": "Ingrid", "monto": 170000, "dia": null, "categoria": "domestico", "centro": "hogar", "cuenta": "" },
+    { "id": "p-tc-rappi", "concepto": "TC Rappi", "monto": 300000, "dia": null, "categoria": "deudas", "centro": "hogar", "cuenta": "" },
+    { "id": "p-credito-andrea", "concepto": "Cuota crédito Andrea", "monto": 190000, "dia": null, "categoria": "deudas", "centro": "hogar", "cuenta": "" },
+    { "id": "p-cuota-carro", "concepto": "Cuota carro", "monto": 475000, "dia": null, "categoria": "carro", "centro": "hogar", "cuenta": "" },
+    { "id": "p-emcali-brisas", "concepto": "EMCALI Brisas", "monto": 220000, "dia": null, "categoria": "servicios", "centro": "brisas", "cuenta": "c-emcali-brisas" },
+    { "id": "p-movistar-brisas", "concepto": "Movistar Brisas", "monto": 142000, "dia": null, "categoria": "servicios", "centro": "brisas", "cuenta": "" }
+  ],
+  "fuentesIngreso": [
+    { "id": "f-vec", "nombre": "VEC", "monto": 2500000, "centro": "hogar" },
+    { "id": "f-multidebienes", "nombre": "Multidebienes", "monto": 1000000, "centro": "hogar" },
+    { "id": "f-tap", "nombre": "TAP", "monto": 950000, "centro": "hogar" },
+    { "id": "f-glassart", "nombre": "Glassart web", "monto": 800000, "centro": "hogar" },
+    { "id": "f-mama", "nombre": "Pago Mamá (Brisas)", "monto": 650000, "centro": "brisas" },
+    { "id": "f-zandrita", "nombre": "Zandrita", "monto": 250000, "centro": "hogar" }
+  ],
+  "movimientos": [],
+  "ingresos": []
+}

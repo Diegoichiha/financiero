@@ -1,0 +1,8 @@
+{
+  "name": "hogy-financiero",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hogy Financiero: dashboard personal de ingresos, gastos y plan del mes (servidor Node sin dependencias).",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
