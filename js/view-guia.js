@@ -75,7 +75,7 @@ export function renderGuia(root) {
   const cCuenta = h('section', { class: 'card w3' },
     h('div', { class: 'card-title' }, 'Tu cuenta y seguridad'),
     h('ul', { class: 'guia-list' },
-      h('li', {}, 'Cada persona entra con su usuario y su contraseña. Los datos son los mismos para las dos: lo que una anota, la otra lo ve.'),
+      h('li', {}, 'Cada persona entra con su usuario y su contraseña, y tiene sus propios datos: lo que una anota no lo ve la otra.'),
       h('li', {}, 'La contraseña se cambia desde tu nombre, arriba a la derecha → "Cambiar contraseña". Usa una que no uses en otro sitio.'),
       h('li', {}, 'Si olvidas tu contraseña, avísale a Diego: puede restablecerla y te da una temporal para crear otra.'),
       h('li', {}, 'Puedes entrar desde el computador o el celular en https://financiero.diegotdesigner.com. Úsenla siempre ahí: la copia que corre en el computador de Diego tiene datos aparte.'),

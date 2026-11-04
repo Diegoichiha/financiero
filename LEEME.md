@@ -11,7 +11,7 @@ Requiere Node.js (ya lo tienes instalado).
 
 ## Ingreso y usuarios
 
-- Hay dos usuarios con los mismos datos: **Diego Torres** (`diego`) y **Andrea Cuellar** (`andrea`).
+- Hay dos usuarios: **Diego Torres** (`diego`) y **Andrea Cuellar** (`andrea`). Cada uno tiene sus propios datos: Diego conserva `data/finanzas.json`; Andrea empieza con todo vacío (`vacio.json`) y sus datos van a `data/finanzas-andrea.json`.
 - Las contraseñas temporales están en `data/CREDENCIALES.txt`. En el primer ingreso la app pide crear una contraseña propia y la temporal deja de servir. Cuando las dos personas ya la hayan cambiado, borra ese archivo.
 - Las contraseñas no se guardan: solo su huella cifrada (`data/usuarios.json`). Tras 5 intentos fallidos, el ingreso se bloquea 10 minutos.
 - Administrar usuarios (desde esta carpeta, con Node):

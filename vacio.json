@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "config": {
+    "incluirCuotaCarro": true,
+    "presupuestos": {
+      "recurrente": 0,
+      "variable": 0,
+      "hormiga": 0
+    },
+    "tope": 0,
+    "mercadoEstimado": 0,
+    "colchonPct": 10,
+    "migraciones": [
+      "plan-nov-2026",
+      "rutinas-2026-11",
+      "rutinas2-2026-11",
+      "rutinas3-2026-11",
+      "cobro-30-2026-11",
+      "markethink-quincenal-2026-11",
+      "mercado-oct-2026",
+      "creditos-2026-11",
+      "auto-ingresos-2026-11"
+    ]
+  },
+  "centros": [
+    {
+      "id": "hogar",
+      "nombre": "Hogar"
+    },
+    {
+      "id": "creditos",
+      "nombre": "Créditos"
+    }
+  ],
+  "medios": [
+    "Efectivo",
+    "Débito",
+    "Tarjeta de crédito",
+    "Transferencia",
+    "Otro"
+  ],
+  "categorias": [
+    {
+      "id": "vivienda",
+      "nombre": "Vivienda",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "servicios",
+      "nombre": "Servicios y telefonía",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "suscripciones",
+      "nombre": "Suscripciones",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "seguros",
+      "nombre": "Seguros",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "bienestar",
+      "nombre": "Gimnasio y bienestar",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "domestico",
+      "nombre": "Servicio doméstico",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "deudas",
+      "nombre": "Deudas y tarjetas",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "carro",
+      "nombre": "Cuota carro",
+      "tipo": "recurrente"
+    },
+    {
+      "id": "mercado",
+      "nombre": "Mercado",
+      "tipo": "variable"
+    },
+    {
+      "id": "transporte",
+      "nombre": "Gasolina y transporte",
+      "tipo": "variable"
+    },
+    {
+      "id": "mascota",
+      "nombre": "Mascota",
+      "tipo": "variable"
+    },
+    {
+      "id": "cuidado",
+      "nombre": "Cuidado personal",
+      "tipo": "variable"
+    },
+    {
+      "id": "vehiculo",
+      "nombre": "Lavado y carro",
+      "tipo": "variable"
+    },
+    {
+      "id": "salud",
+      "nombre": "Salud",
+      "tipo": "variable"
+    },
+    {
+      "id": "hogar-var",
+      "nombre": "Hogar y ropa",
+      "tipo": "variable"
+    },
+    {
+      "id": "otros-var",
+      "nombre": "Otros variables",
+      "tipo": "variable"
+    },
+    {
+      "id": "domicilios",
+      "nombre": "Domicilios",
+      "tipo": "hormiga"
+    },
+    {
+      "id": "salidas",
+      "nombre": "Salidas",
+      "tipo": "hormiga"
+    },
+    {
+      "id": "comida-rapida",
+      "nombre": "Comida rápida",
+      "tipo": "hormiga"
+    },
+    {
+      "id": "cafe",
+      "nombre": "Café y snacks",
+      "tipo": "hormiga"
+    },
+    {
+      "id": "antojos",
+      "nombre": "Antojos y otros",
+      "tipo": "hormiga"
+    }
+  ],
+  "cuentas": [],
+  "plantillas": [],
+  "fuentesIngreso": [],
+  "movimientos": [],
+  "ingresos": [],
+  "mercadoHistorial": [],
+  "tarjetas": [],
+  "creditos": [],
+  "planIngresos": [],
+  "compromisos": [],
+  "cuentasDinero": [],
+  "rutinas": []
+}

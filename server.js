@@ -30,39 +30,50 @@ const stamp = () => {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 };
 
-function readData() {
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-    fs.copyFileSync(SEED_FILE, DATA_FILE);
+// Cada persona tiene sus propios datos. El dueño (diego) conserva el archivo de siempre; las demás, finanzas-<usuario>.json
+// (empiezan con vacio.json: sin movimientos, ingresos ni cuentas).
+const DUENO = 'diego';
+const VACIO_FILE = path.join(ROOT, 'vacio.json');
+const archivoDe = (usuario) => (usuario === DUENO ? DATA_FILE : path.join(path.dirname(DATA_FILE), `finanzas-${usuario}.json`));
+const respaldosDe = (usuario) => (usuario === DUENO ? BACKUP_DIR : path.join(BACKUP_DIR, usuario));
+
+function readData(usuario) {
+  const file = archivoDe(usuario);
+  if (!fs.existsSync(file)) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.copyFileSync(usuario === DUENO ? SEED_FILE : VACIO_FILE, file);
   }
-  return fs.readFileSync(DATA_FILE, 'utf8');
+  return fs.readFileSync(file, 'utf8');
 }
 
-function backupIfNeeded() {
-  if (!fs.existsSync(DATA_FILE)) return;
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith('.json')).sort();
+function backupIfNeeded(usuario) {
+  const file = archivoDe(usuario);
+  const dir = respaldosDe(usuario);
+  if (!fs.existsSync(file)) return;
+  fs.mkdirSync(dir, { recursive: true });
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
   const last = files[files.length - 1];
   if (last) {
-    const age = Date.now() - fs.statSync(path.join(BACKUP_DIR, last)).mtimeMs;
+    const age = Date.now() - fs.statSync(path.join(dir, last)).mtimeMs;
     if (age < BACKUP_EVERY_MS) return;
   }
-  fs.copyFileSync(DATA_FILE, path.join(BACKUP_DIR, `finanzas-${stamp()}.json`));
-  const all = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith('.json')).sort();
+  fs.copyFileSync(file, path.join(dir, `finanzas-${stamp()}.json`));
+  const all = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
   for (const old of all.slice(0, Math.max(0, all.length - BACKUP_KEEP))) {
-    fs.unlinkSync(path.join(BACKUP_DIR, old));
+    fs.unlinkSync(path.join(dir, old));
   }
 }
 
-function writeData(text) {
+function writeData(usuario, text) {
   const parsed = JSON.parse(text);
   if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.movimientos)) {
     throw new Error('Estructura de datos inválida');
   }
-  backupIfNeeded();
-  const tmp = DATA_FILE + '.tmp';
+  backupIfNeeded(usuario);
+  const file = archivoDe(usuario);
+  const tmp = file + '.tmp';
   fs.writeFileSync(tmp, text, 'utf8');
-  fs.renameSync(tmp, DATA_FILE);
+  fs.renameSync(tmp, file);
 }
 
 const hostOk = (host) => /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host || '');
@@ -138,14 +149,14 @@ async function api(req, res, url) {
     if (u.debeCambiar) return json(res, 403, { error: 'Primero cambia tu contraseña.' });
     if (req.method === 'GET') {
       try {
-        return send(res, 200, readData(), { 'Content-Type': 'application/json; charset=utf-8' });
+        return send(res, 200, readData(u.usuario), { 'Content-Type': 'application/json; charset=utf-8' });
       } catch (e) {
         return json(res, 500, { error: String(e.message) });
       }
     }
     if (req.method === 'PUT') {
       try {
-        writeData(await leerCuerpo(req, MAX_BODY));
+        writeData(u.usuario, await leerCuerpo(req, MAX_BODY));
         return json(res, 200, { ok: true });
       } catch (e) {
         return json(res, 400, { error: String(e.message) });

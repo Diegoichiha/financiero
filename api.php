@@ -151,14 +151,18 @@ function registrar_fallo(string $llave): void { con_intentos(function (&$m) use 
 function limpiar_fallos(string $llave): void { con_intentos(function (&$m) use ($llave) { unset($m[$llave]); }); }
 
 // ---------------------------------------------------------------- datos
-function ruta_datos(): string { return carpeta_datos() . '/finanzas.json.php'; }
-function respaldar_si_toca(): void {
-    $dir = carpeta_datos() . '/backups';
+// Cada persona tiene sus propios datos. El dueño (diego) conserva el archivo de siempre; las demás, finanzas-<usuario>.json.php
+// (empiezan con vacio.json: sin movimientos, ingresos ni cuentas). El nombre de usuario sale de la base de usuarios, nunca de la petición.
+const DUENO = 'diego';
+function ruta_datos(string $usuario): string { return carpeta_datos() . '/' . ($usuario === DUENO ? 'finanzas.json.php' : 'finanzas-' . $usuario . '.json.php'); }
+function respaldar_si_toca(string $usuario): void {
+    $dir = carpeta_datos() . '/backups' . ($usuario === DUENO ? '' : '/' . $usuario);
+    if (!is_dir($dir)) @mkdir($dir, 0750, true);
     $archivos = glob("$dir/finanzas-*.json.php") ?: [];
     sort($archivos);
     $ultimo = end($archivos);
     if ($ultimo && time() - filemtime($ultimo) < BACKUP_CADA) return;
-    if (is_file(ruta_datos())) @copy(ruta_datos(), "$dir/finanzas-" . date('Ymd-His') . '.json.php');
+    if (is_file(ruta_datos($usuario))) @copy(ruta_datos($usuario), "$dir/finanzas-" . date('Ymd-His') . '.json.php');
     $archivos = glob("$dir/finanzas-*.json.php") ?: [];
     sort($archivos);
     foreach (array_slice($archivos, 0, max(0, count($archivos) - BACKUP_GUARDAR)) as $viejo) @unlink($viejo);
@@ -196,6 +200,8 @@ try {
             'datosFueraDeLaWeb' => strpos($real, $web) !== 0,
             'semilla' => is_file(__DIR__ . '/semilla-usuarios.json'),
             'catalogoBase' => is_file(__DIR__ . '/seed.json'),
+            'plantillaVacia' => is_file(__DIR__ . '/vacio.json'),
+            'respaldosPorUsuario' => (is_dir($dir . '/backups/_salud') || @mkdir($dir . '/backups/_salud', 0750, true)) && @rmdir($dir . '/backups/_salud') !== false,
             'usuarios' => count(usuarios_db()['usuarios']),
             'https' => es_https(),
         ]);
@@ -243,11 +249,11 @@ try {
     if ($ruta === 'data') {
         if (!empty($u['debeCambiar'])) salir_json(403, ['error' => 'Primero cambia tu contraseña.']);
         if ($metodo === 'GET') {
-            $t = leer_php(ruta_datos());
-            if ($t === null) { // primera vez: se arranca con el catálogo base
-                $semilla = __DIR__ . '/seed.json';
+            $t = leer_php(ruta_datos($u['usuario']));
+            if ($t === null) { // primera vez: el dueño arranca con el catálogo base; las demás personas, con todo vacío
+                $semilla = __DIR__ . '/' . ($u['usuario'] === DUENO ? 'seed.json' : 'vacio.json');
                 $t = is_file($semilla) ? (string) file_get_contents($semilla) : '{"version":1,"movimientos":[]}';
-                escribir_php(ruta_datos(), $t);
+                escribir_php(ruta_datos($u['usuario']), $t);
             }
             salir_json(200, $t);
         }
@@ -256,8 +262,8 @@ try {
             if ($t === false || strlen($t) > MAX_BODY) salir_json(400, ['error' => 'Cuerpo demasiado grande']);
             $d = json_decode($t, true);
             if (!is_array($d) || !isset($d['movimientos']) || !is_array($d['movimientos'])) salir_json(400, ['error' => 'Estructura de datos inválida']);
-            respaldar_si_toca();
-            escribir_php(ruta_datos(), $t);
+            respaldar_si_toca($u['usuario']);
+            escribir_php(ruta_datos($u['usuario']), $t);
             salir_json(200, ['ok' => true]);
         }
         salir_json(405, ['error' => 'Método no permitido']);

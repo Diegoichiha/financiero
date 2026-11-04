@@ -199,7 +199,7 @@ export function renderAjustes(root) {
   });
   const datosCard = h('section', { class: 'card' },
     h('div', { class: 'card-title' }, 'Tus datos'),
-    h('div', { class: 'card-sub' }, 'Todo se guarda en el archivo data/finanzas.json de esta carpeta, con copias automáticas en data/backups. Nada sale de tu computador.'),
+    h('div', { class: 'card-sub' }, 'Tus datos son solo tuyos: se guardan en el servidor, con copias automáticas, y nadie más con una cuenta los ve. Exporta una copia de vez en cuando.'),
     h('div', { class: 'row' },
       h('button', { class: 'btn', onclick: () => download(`finanzas-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state.data, null, 2)) }, 'Exportar copia (JSON)'),
       h('button', { class: 'btn', onclick: () => archivo.click() }, 'Importar copia…'), archivo,
