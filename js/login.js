@@ -50,7 +50,7 @@ export function pantallaLogin(root, alEntrar) {
     if (!usuario.value.trim() || !clave.inp.value) { err.textContent = 'Escribe tu usuario y tu contraseña.'; return; }
     boton.disabled = true;
     boton.textContent = 'Entrando…';
-    const r = await post('/api/login', { usuario: usuario.value, clave: clave.inp.value, recordar: recordar.checked });
+    const r = await post('api/login', { usuario: usuario.value, clave: clave.inp.value, recordar: recordar.checked });
     boton.disabled = false;
     boton.textContent = 'Entrar';
     if (!r.ok) { err.textContent = r.error || 'No se pudo entrar. ¿Está abierto el servidor?'; clave.inp.select(); return; }
@@ -79,7 +79,7 @@ export function pantallaClave(root, { obligatorio, nombre, alTerminar, alVolver 
     if (nueva.inp.value.length < 8) { err.textContent = 'La nueva contraseña debe tener al menos 8 caracteres.'; return; }
     if (nueva.inp.value !== repetir.value) { err.textContent = 'Las dos contraseñas nuevas no coinciden.'; return; }
     boton.disabled = true;
-    const r = await post('/api/clave', { actual: actual.inp.value, nueva: nueva.inp.value });
+    const r = await post('api/clave', { actual: actual.inp.value, nueva: nueva.inp.value });
     boton.disabled = false;
     if (!r.ok) { err.textContent = r.error || 'No se pudo cambiar la contraseña.'; return; }
     alTerminar();

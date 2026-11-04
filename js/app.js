@@ -111,7 +111,7 @@ function abrirCuenta() {
       h('button', { class: 'btn', onclick: () => { cerrar(); flush().then(() => pantallaClave(app, { obligatorio: false, alTerminar: () => location.reload(), alVolver: () => location.reload() })); } }, 'Cambiar contraseña'),
       h('span', { class: 'spacer' }),
       h('button', { class: 'btn', onclick: cerrar }, 'Cerrar'),
-      h('button', { class: 'btn primary', onclick: async () => { await flush(); await post('/api/logout'); location.reload(); } }, 'Salir')));
+      h('button', { class: 'btn primary', onclick: async () => { await flush(); await post('api/logout'); location.reload(); } }, 'Salir')));
   dlg.addEventListener('cancel', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
@@ -208,7 +208,7 @@ function entrar(usuario) {
 
 async function arrancar() {
   let r;
-  try { r = await fetch('/api/sesion', { headers: { 'X-Requested-With': 'finanzas' } }); } catch (e) { return errorServidor(e); }
+  try { r = await fetch('api/sesion', { headers: { 'X-Requested-With': 'finanzas' } }); } catch (e) { return errorServidor(e); }
   if (r.status === 401) return pantallaLogin(app, entrar);
   if (!r.ok) return errorServidor(new Error('El servidor respondió ' + r.status));
   entrar((await r.json()).usuario);

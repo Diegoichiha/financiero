@@ -25,7 +25,7 @@ export const hooks = { rerender: () => {}, saveStatus: () => {}, goTab: () => {}
 const HEADERS = { 'X-Requested-With': 'finanzas' };
 
 export async function load() {
-  const r = await fetch('/api/data', { headers: HEADERS });
+  const r = await fetch('api/data', { headers: HEADERS });
   if (!r.ok) throw Object.assign(new Error('El servidor respondió ' + r.status), { status: r.status });
   state.data = await r.json();
   if (migrate(state.data)) save();
@@ -252,7 +252,7 @@ export async function flush() {
   saving = true;
   dirty = false; // si algo cambia mientras se guarda, save() lo vuelve a marcar
   try {
-    const r = await fetch('/api/data', {
+    const r = await fetch('api/data', {
       method: 'PUT',
       headers: { ...HEADERS, 'Content-Type': 'application/json' },
       body: JSON.stringify(state.data),
@@ -272,7 +272,7 @@ export async function flush() {
 // Al cerrar la pestaña solo se guarda si quedaron cambios sin enviar.
 window.addEventListener('beforeunload', () => {
   if (dirty) {
-    fetch('/api/data', {
+    fetch('api/data', {
       method: 'PUT',
       headers: { ...HEADERS, 'Content-Type': 'application/json' },
       body: JSON.stringify(state.data),

@@ -13,7 +13,11 @@ const SESION_LARGA = 30 * 24 * 60 * 60;
 const MAX_FALLOS = 5;
 const BLOQUEO_MS = 10 * 60 * 1000;
 
-const huella = (clave, salt) => crypto.scryptSync(String(clave), salt, 64).toString('hex');
+// Dos formatos: 'scrypt' (los primeros usuarios) y 'pbkdf2' (portable: el servidor PHP del hosting compartido usa el mismo).
+const PBKDF2_ITER = 210000;
+const huella = (clave, salt, alg) => (alg === 'pbkdf2'
+  ? crypto.pbkdf2Sync(String(clave), salt, PBKDF2_ITER, 64, 'sha256')
+  : crypto.scryptSync(String(clave), salt, 64)).toString('hex');
 const iguales = (a, b) => {
   const x = Buffer.from(String(a), 'hex');
   const y = Buffer.from(String(b), 'hex');
@@ -48,7 +52,7 @@ function crearAuth(dataDir) {
     if (!/^[a-z0-9._-]{3,30}$/.test(id)) throw new Error('El usuario debe tener 3 a 30 letras minúsculas, números, punto, guion o guion bajo.');
     if (db.usuarios.some((u) => u.usuario === id)) throw new Error('Ya existe el usuario ' + id);
     const salt = crypto.randomBytes(16).toString('hex');
-    db.usuarios.push({ usuario: id, nombre: String(nombre || id).trim(), salt, hash: huella(clave, salt), debeCambiar, creado: new Date().toISOString() });
+    db.usuarios.push({ usuario: id, nombre: String(nombre || id).trim(), alg: 'pbkdf2', salt, hash: huella(clave, salt, 'pbkdf2'), debeCambiar, creado: new Date().toISOString() });
     guardar(db);
     return id;
   }
@@ -57,7 +61,8 @@ function crearAuth(dataDir) {
     const u = db.usuarios.find((x) => x.usuario === normal(usuario));
     if (!u) throw new Error('No existe el usuario ' + usuario);
     u.salt = crypto.randomBytes(16).toString('hex');
-    u.hash = huella(clave, u.salt);
+    u.alg = 'pbkdf2';
+    u.hash = huella(clave, u.salt, 'pbkdf2');
     u.debeCambiar = !!debeCambiar;
     guardar(db);
   }
@@ -75,7 +80,7 @@ function crearAuth(dataDir) {
   const FALSA_HUELLA = huella('no-existe', FALSA_SAL);
   function verificar(usuario, clave) {
     const u = leer().usuarios.find((x) => x.usuario === normal(usuario));
-    const ok = iguales(huella(clave, u ? u.salt : FALSA_SAL), u ? u.hash : FALSA_HUELLA); // el mismo trabajo exista o no el usuario
+    const ok = iguales(huella(clave, u ? u.salt : FALSA_SAL, u ? u.alg : undefined), u ? u.hash : FALSA_HUELLA); // el mismo trabajo exista o no el usuario
     return u && ok ? u : null;
   }
 

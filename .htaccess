@@ -1,0 +1,23 @@
+# Hogy Financiero · configuración para hosting compartido (LiteSpeed / Apache con PHP)
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_rewrite.c>
+RewriteEngine On
+# La API vive en api.php (mismas rutas que el servidor Node)
+RewriteRule ^api/(login|logout|sesion|clave|data)/?$ api.php?ruta=$1 [QSA,L]
+# Archivos del servidor Node y de desarrollo: no se sirven por la web
+RewriteRule ^(server\.js|auth\.js|usuarios\.js|seed\.json|semilla-usuarios\.json|package\.json|LEEME\.md|iniciar\.bat|\.gitignore)$ - [F,L]
+RewriteRule ^data(/|$) - [F,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-Frame-Options "DENY"
+Header always set Referrer-Policy "same-origin"
+Header always set Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
+# Que cada despliegue nuevo se vea de inmediato (el navegador revisa antes de usar lo guardado)
+<FilesMatch "\.(html|js|css)$">
+Header set Cache-Control "no-cache"
+</FilesMatch>
+</IfModule>

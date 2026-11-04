@@ -1,0 +1,22 @@
+{
+  "usuarios": [
+    {
+      "usuario": "diego",
+      "nombre": "Diego Torres",
+      "alg": "pbkdf2",
+      "salt": "89a564c9fd8d46460bb21f03e8ef8745",
+      "hash": "27fcf97779dee1a26ab9c2e03092ccb66f7ff9c482f4b6710ec03e0dab82b3d4b4aee912ae3ae7c936e179449f317ef841ae462171d6d94903189d347bb12d8f",
+      "debeCambiar": true,
+      "creado": "2026-11-04T21:50:52.916Z"
+    },
+    {
+      "usuario": "andrea",
+      "nombre": "Andrea Cuellar",
+      "alg": "pbkdf2",
+      "salt": "854c1e9bcae85022cdc33eebd8fcd9d2",
+      "hash": "fd0056d379091ce13fbda5bc0225fa6148f03294201d85a7c03757d18a021c78cedb72bc7605a1e2ccb44690315cd81aa784f49d1adeefe980efa64c0a36636b",
+      "debeCambiar": true,
+      "creado": "2026-11-04T21:50:52.983Z"
+    }
+  ]
+}
