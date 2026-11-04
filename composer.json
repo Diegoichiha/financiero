@@ -1,0 +1,9 @@
+{
+  "name": "diegoichiha/financiero",
+  "description": "Hogy Financiero: dashboard personal de ingresos, gastos y plan del mes.",
+  "type": "project",
+  "license": "proprietary",
+  "require": {
+    "php": ">=7.4"
+  }
+}
