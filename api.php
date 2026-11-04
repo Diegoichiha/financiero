@@ -175,6 +175,24 @@ function cuerpo_json(int $max): array {
 }
 
 try {
+    // Comprobación de salud: solo dice si el servidor puede guardar y leer (sin datos ni rutas).
+    if ($ruta === 'salud' && $metodo === 'GET') {
+        $dir = carpeta_datos();
+        $prueba = $dir . '/salud.json.php';
+        escribir_php($prueba, '{"ok":true}');
+        $guarda = leer_php($prueba) === '{"ok":true}';
+        @unlink($prueba);
+        $web = realpath(__DIR__) ?: __DIR__;
+        $real = realpath($dir) ?: $dir;
+        salir_json(200, [
+            'ok' => $guarda,
+            'datosFueraDeLaWeb' => strpos($real, $web) !== 0,
+            'semilla' => is_file(__DIR__ . '/semilla-usuarios.json'),
+            'catalogoBase' => is_file(__DIR__ . '/seed.json'),
+            'usuarios' => count(usuarios_db()['usuarios']),
+            'https' => es_https(),
+        ]);
+    }
     if ($ruta === 'login' && $metodo === 'POST') {
         $d = cuerpo_json(4096);
         $usuario = (string) ($d['usuario'] ?? '');

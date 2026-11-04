@@ -5,9 +5,9 @@ DirectoryIndex index.html
 <IfModule mod_rewrite.c>
 RewriteEngine On
 # La API vive en api.php (mismas rutas que el servidor Node)
-RewriteRule ^api/(login|logout|sesion|clave|data)/?$ api.php?ruta=$1 [QSA,L]
+RewriteRule ^api/(login|logout|sesion|clave|data|salud)/?$ api.php?ruta=$1 [QSA,L]
 # Archivos del servidor Node y de desarrollo: no se sirven por la web
-RewriteRule ^(server\.js|auth\.js|usuarios\.js|seed\.json|semilla-usuarios\.json|package\.json|LEEME\.md|iniciar\.bat|\.gitignore)$ - [F,L]
+RewriteRule ^(server\.js|auth\.js|usuarios\.js|seed\.json|semilla-usuarios\.json|package\.json|composer\.json|composer\.lock|LEEME\.md|iniciar\.bat|\.gitignore)$ - [F,L]
 RewriteRule ^data(/|$) - [F,L]
 </IfModule>
 
