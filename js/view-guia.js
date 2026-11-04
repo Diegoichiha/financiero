@@ -77,8 +77,8 @@ export function renderGuia(root) {
     h('ul', { class: 'guia-list' },
       h('li', {}, 'Cada persona entra con su usuario y su contraseña. Los datos son los mismos para las dos: lo que una anota, la otra lo ve.'),
       h('li', {}, 'La contraseña se cambia desde tu nombre, arriba a la derecha → "Cambiar contraseña". Usa una que no uses en otro sitio.'),
-      h('li', {}, 'Si olvidas tu contraseña, pídele a Diego una temporal nueva (se genera con el comando "node usuarios.js clave tu-usuario").'),
-      h('li', {}, 'La app corre solo en el computador de Diego (http://localhost:5210): no está publicada en internet. Para usarla desde otro equipo o el celular habría que montarla en un servidor con conexión segura.'),
+      h('li', {}, 'Si olvidas tu contraseña, avísale a Diego: puede restablecerla y te da una temporal para crear otra.'),
+      h('li', {}, 'Puedes entrar desde el computador o el celular en https://financiero.diegotdesigner.com. Úsenla siempre ahí: la copia que corre en el computador de Diego tiene datos aparte.'),
       h('li', {}, 'Después de 5 intentos fallidos el ingreso se bloquea 10 minutos.')));
 
   root.replaceChildren(h('div', { class: 'grid' }, cBienvenida, cPasos, cGlosario, cPestanas, cTips, cCuenta));

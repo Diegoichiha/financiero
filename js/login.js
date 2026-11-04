@@ -40,7 +40,7 @@ export function pantallaLogin(root, alEntrar) {
   const err = h('div', { class: 'auth-err', role: 'alert' });
   const boton = h('button', { type: 'submit', class: 'btn primary' }, 'Entrar');
   const form = marco(root, 'bienvenido', 'Acceso privado',
-    h('div', { class: 'card-sub' }, 'Tus finanzas viven solo en este computador. Entra con tu usuario y tu contraseña.'),
+    h('div', { class: 'card-sub' }, 'Tus datos son privados. Entra con tu usuario y tu contraseña.'),
     campo('Usuario', usuario), campo('Contraseña', clave.fila),
     h('label', { class: 'switch' }, recordar, 'Mantener la sesión abierta 30 días'),
     err, boton);

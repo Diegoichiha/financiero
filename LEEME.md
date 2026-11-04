@@ -18,7 +18,7 @@ Requiere Node.js (ya lo tienes instalado).
   - `node usuarios.js listar`
   - `node usuarios.js clave andrea` genera otra contraseña temporal (si alguien olvidó la suya)
   - `node usuarios.js agregar <usuario> "<Nombre completo>"` y `node usuarios.js quitar <usuario>`
-- La app solo acepta conexiones de este computador (`localhost`). Para usarla desde el celular u otro equipo habría que montarla en un servidor con conexión segura (HTTPS).
+- Esta copia local solo acepta conexiones de este computador (`localhost`). La versión para usar desde cualquier lugar está en https://financiero.diegotdesigner.com (ver "En la web").
 
 ## Cómo se usa
 
@@ -35,3 +35,11 @@ Dentro de la app está la pestaña **Guía de uso** con la rutina diaria y el si
 - Se guardan en `data/finanzas.json` (copias automáticas cada 30 minutos en `data/backups`).
 - La carpeta `data/` (datos, usuarios y credenciales) está excluida de git: no la subas a ningún repositorio.
 - Para ver el dashboard con vida sin tocar tus datos: Ajustes → "Cargar datos de ejemplo" (y luego "Quitar datos de ejemplo").
+
+## En la web (Hostinger)
+
+- https://financiero.diegotdesigner.com corre con PHP (`api.php`) y se despliega solo al hacer push a `main` (hPanel → Git). Se necesita `composer.json` para que Hostinger reconozca el proyecto.
+- Los usuarios iniciales salen de `semilla-usuarios.json` (solo huellas); las contraseñas temporales están en `data/CREDENCIALES-SERVIDOR.txt` (no se sube a git). Cada persona crea la suya en el primer ingreso.
+- Los datos del servidor viven en la carpeta `hogy-data` de tu cuenta de Hostinger (fuera de la carpeta web). Revisa que existe en el Administrador de archivos y haz copias con Ajustes → Exportar copia.
+- Si alguien olvida su contraseña: en el Administrador de archivos borra `hogy-data/usuarios.json.php`; la app lo recrea con las contraseñas temporales originales y cada quien crea una nueva.
+- La web y la copia local tienen datos separados: para pasar datos, Ajustes → Exportar copia (origen) e Importar copia (destino).
