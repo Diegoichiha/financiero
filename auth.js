@@ -80,7 +80,10 @@ function crearAuth(dataDir) {
   const FALSA_HUELLA = huella('no-existe', FALSA_SAL);
   function verificar(usuario, clave) {
     const u = leer().usuarios.find((x) => x.usuario === normal(usuario));
-    const ok = iguales(huella(clave, u ? u.salt : FALSA_SAL, u ? u.alg : undefined), u ? u.hash : FALSA_HUELLA); // el mismo trabajo exista o no el usuario
+    const prueba = (c) => iguales(huella(c, u ? u.salt : FALSA_SAL, u ? u.alg : undefined), u ? u.hash : FALSA_HUELLA); // el mismo trabajo exista o no el usuario
+    let ok = prueba(clave);
+    // La contraseña temporal se escribe XXXX-XXXX-XXXX; mientras siga siendo temporal también sirve sin los guiones.
+    if (!ok && u && u.debeCambiar && /^[A-Za-z0-9]{12}$/.test(String(clave))) ok = prueba(String(clave).replace(/(.{4})(.{4})(.{4})/, '$1-$2-$3'));
     return u && ok ? u : null;
   }
 

@@ -86,8 +86,15 @@ function huella(string $clave, string $salt): string { return hash_pbkdf2('sha25
 function verificar(string $usuario, string $clave): ?array {
     $u = buscar_usuario($usuario);
     $ok = false;
-    if ($u && ($u['alg'] ?? '') === 'pbkdf2') $ok = hash_equals($u['hash'], huella($clave, $u['salt']));
-    else huella($clave, str_repeat('0', 32)); // mismo trabajo exista o no el usuario
+    if ($u && ($u['alg'] ?? '') === 'pbkdf2') {
+        $ok = hash_equals($u['hash'], huella($clave, $u['salt']));
+        // La contraseña temporal se escribe XXXX-XXXX-XXXX; mientras siga siendo temporal también sirve sin los guiones.
+        if (!$ok && !empty($u['debeCambiar']) && preg_match('/^[A-Za-z0-9]{12}$/', $clave)) {
+            $ok = hash_equals($u['hash'], huella(substr($clave, 0, 4) . '-' . substr($clave, 4, 4) . '-' . substr($clave, 8, 4), $u['salt']));
+        }
+    } else {
+        huella($clave, str_repeat('0', 32)); // mismo trabajo exista o no el usuario
+    }
     return $ok ? $u : null;
 }
 function publico(array $u): array { return ['usuario' => $u['usuario'], 'nombre' => $u['nombre'], 'debeCambiar' => !empty($u['debeCambiar'])]; }
