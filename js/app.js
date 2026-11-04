@@ -58,7 +58,7 @@ function build() {
   refs.main = h('main', { id: 'main' });
   app.replaceChildren(h('div', { class: 'app' },
     h('aside', { class: 'side' },
-      h('div', { class: 'brand' }, h('span', { class: 'brand-word' }, 'Hogy Financiero'), h('i', { class: 'brand-dot' })),
+      h('button', { type: 'button', class: 'brand', title: 'Ir al inicio', 'aria-label': 'Hogy Financiero: ir al inicio', onclick: () => { state.tab = 'resumen'; render(); window.scrollTo(0, 0); } }, h('span', { class: 'brand-word' }, 'Hogy Financiero'), h('i', { class: 'brand-dot' })),
       refs.tabs),
     h('div', { class: 'content' }, refs.banner, refs.head, refs.filters, refs.main)));
 }

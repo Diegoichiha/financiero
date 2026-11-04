@@ -507,3 +507,10 @@ details.ajustes-plan[open] summary { margin-bottom: 10px; }
 .ts-ico.moon { right: 3px; }
 .ts-ico .ico { display: grid; place-items: center; width: 15px; height: 15px; line-height: 0; }
 .ts-ico svg { display: block; }
+
+/* El nombre de la marca es un botón: lleva al inicio */
+button.brand { background: none; border: 0; padding: 2px 14px; color: var(--ink); font-family: inherit; cursor: pointer; text-align: left; border-radius: 14px; }
+button.brand:hover .brand-word { color: var(--accent); }
+button.brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.auth-top button.brand { padding-left: 0; }
+.auth-alt { display: flex; justify-content: center; margin-top: -4px; }

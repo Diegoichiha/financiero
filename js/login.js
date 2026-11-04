@@ -9,16 +9,23 @@ export async function post(url, cuerpo) {
   return { ok: r.ok, status: r.status, ...j };
 }
 
-function marco(root, titulo, eyebrow, ...contenido) {
+// El nombre de arriba es un botón: lleva al inicio (con la contraseña pendiente, cierra la sesión para poder entrar con otro usuario).
+function marco(root, titulo, eyebrow, alInicio, ...contenido) {
   root.replaceChildren(h('div', { class: 'auth' },
     h('div', { class: 'auth-top' },
-      h('div', { class: 'brand' }, h('span', { class: 'brand-word' }, 'Hogy Financiero'), h('i', { class: 'brand-dot' })),
+      h('button', { type: 'button', class: 'brand', title: 'Volver al inicio', 'aria-label': 'Hogy Financiero: volver al inicio', onclick: alInicio }, h('span', { class: 'brand-word' }, 'Hogy Financiero'), h('i', { class: 'brand-dot' })),
       switchTema()),
     h('form', { class: 'auth-card', novalidate: true },
       h('div', { class: 'eyebrow' }, h('i', { class: 'eb-line' }), eyebrow),
       h('h1', {}, titulo),
       ...contenido)));
   return root.querySelector('form');
+}
+
+// Cierra la sesión y vuelve a la pantalla de ingreso (para entrar con otro usuario).
+export async function salirAlInicio() {
+  await post('api/logout');
+  location.reload();
 }
 
 const campo = (etiqueta, control) => h('label', { class: 'f' }, etiqueta, control);
@@ -39,7 +46,7 @@ export function pantallaLogin(root, alEntrar) {
   const recordar = h('input', { type: 'checkbox' });
   const err = h('div', { class: 'auth-err', role: 'alert' });
   const boton = h('button', { type: 'submit', class: 'btn primary' }, 'Entrar');
-  const form = marco(root, 'bienvenido', 'Acceso privado',
+  const form = marco(root, 'bienvenido', 'Acceso privado', () => location.reload(),
     h('div', { class: 'card-sub' }, 'Tus datos son privados. Entra con tu usuario y tu contraseña.'),
     campo('Usuario', usuario), campo('Contraseña', clave.fila),
     h('label', { class: 'switch' }, recordar, 'Mantener la sesión abierta 30 días'),
@@ -66,13 +73,14 @@ export function pantallaClave(root, { obligatorio, nombre, alTerminar, alVolver 
   const repetir = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Escríbela otra vez' });
   const err = h('div', { class: 'auth-err', role: 'alert' });
   const boton = h('button', { type: 'submit', class: 'btn primary' }, 'Guardar contraseña');
-  const form = marco(root, obligatorio ? 'crea tu contraseña' : 'cambiar contraseña', obligatorio ? `Primer ingreso${nombre ? ' · ' + nombre : ''}` : 'Tu cuenta',
+  const form = marco(root, obligatorio ? 'crea tu contraseña' : 'cambiar contraseña', obligatorio ? `Primer ingreso${nombre ? ' · ' + nombre : ''}` : 'Tu cuenta', obligatorio ? salirAlInicio : alVolver,
     h('div', { class: 'card-sub' }, obligatorio
       ? 'La contraseña temporal solo sirve para esta vez. Elige una propia que solo tú conozcas.'
       : 'Después de cambiarla, las demás sesiones abiertas con la clave anterior se cierran.'),
     campo('Contraseña actual', actual.fila), campo('Contraseña nueva', nueva.fila), campo('Repite la nueva', repetir),
     err,
-    h('div', { class: 'auth-actions' }, obligatorio ? null : h('button', { type: 'button', class: 'btn', onclick: alVolver }, 'Volver'), boton));
+    h('div', { class: 'auth-actions' }, obligatorio ? null : h('button', { type: 'button', class: 'btn', onclick: alVolver }, 'Volver'), boton),
+    obligatorio ? h('div', { class: 'auth-alt' }, h('button', { type: 'button', class: 'btn ghost sm', onclick: salirAlInicio }, 'Volver al inicio y entrar con otro usuario')) : null);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     err.textContent = '';
