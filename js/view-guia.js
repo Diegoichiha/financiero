@@ -4,10 +4,10 @@ import { icon } from './icons.js';
 import { state, hooks } from './store.js';
 
 const PASOS = [
-  { t: 'Actualiza lo que tienes', d: 'En el Plan del mes, escribe el saldo de cada cuenta en la tarjeta "Tengo hoy". Todo el plan parte de ese número, así que mantenlo al día.', ir: 'plan', b: 'Ir al Plan del mes' },
-  { t: 'Anota lo que recibes', d: 'En Ingresos pulsa "+ Recibí" cuando te paguen. Lo que todavía no llega queda como "Espero recibir", con su fecha.', ir: 'ingresos', b: 'Ir a Ingresos' },
-  { t: 'Marca lo que pagas', d: 'En Recurrentes elige los pagos del mes y pulsa "Marcar pagado" al pagar cada uno. Lo que sigue pendiente es "Falta por pagar".', ir: 'recurrentes', b: 'Ir a Recurrentes' },
-  { t: 'Registra lo que gastas', d: 'En Gastos anota el mercado, domicilios, salidas… Lo que ya compraste en mercado se descuenta del presupuesto de mercado.', ir: 'movimientos', b: 'Ir a Gastos' },
+  { t: 'Pon lo que tienes hoy', d: 'La primera vez, escribe en "Tengo hoy" (Plan del mes) el saldo de cada cuenta. Después se mueve solo con tus ingresos y pagos; si no coincide con el banco, corrígelo ahí.', ir: 'plan', b: 'Ir al Plan del mes' },
+  { t: 'Anota lo que recibes', d: 'En Ingresos pulsa "+ Recibí" cuando te paguen. Lo que todavía no llega queda como "Espero recibir", con su fecha. Eliges en qué cuenta entró y se suma sola a "Tengo hoy".', ir: 'ingresos', b: 'Ir a Ingresos' },
+  { t: 'Marca lo que pagas', d: 'En Recurrentes elige los pagos del mes y pulsa "Marcar pagado" al pagar cada uno. Lo que sigue pendiente es "Falta por pagar". Eliges de qué cuenta pagaste y se descuenta sola de "Tengo hoy".', ir: 'recurrentes', b: 'Ir a Recurrentes' },
+  { t: 'Registra lo que gastas', d: 'En Gastos anota el mercado, domicilios, salidas… Lo que ya compraste en mercado se descuenta del presupuesto de mercado. Eliges la cuenta de la que salió (o ninguna, si fue en efectivo o con tarjeta).', ir: 'movimientos', b: 'Ir a Gastos' },
   { t: 'Presupuesta tus compromisos', d: 'En el Plan del mes, escribe cuánto quieres gastar en cada compromiso (paseos, cumpleaños…). El plan te dice el máximo posible y cuánto te queda para gustos.', ir: 'plan', b: 'Ir a los compromisos' },
 ];
 

@@ -6,11 +6,12 @@ import {
   state, TIPOS, TIPO, hooks, curMes, curRange, visibleMovs, visibleIngresos, sum, categoria, centroNombre, cuentaById,
   instancia, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
   addMov, updateMov, delMov, addIngreso, updateIngreso, delIngreso, saveFuente, delFuente, save,
-  planGasto, setEsperado, addEsperado, delEsperado, setCobros,
+  planGasto, setEsperado, addEsperado, delEsperado, setCobros, cuentaSugerida, recordarCuenta,
 } from './store.js';
 import { modal, confirmar, field, moneyInput, select, toast, copiar } from './ui.js';
 import { medidor } from './charts.js';
 import { extractoPagadoEn } from './creditos.js';
+import { selectorCuenta, esMedioSinCuenta, pagarMov, desmarcarPago, nombreCuenta, avisoCuenta } from './cuentas-enlace.js';
 
 const centroOpts = () => state.data.centros.map((c) => ({ value: c.id, label: c.nombre }));
 const catOpts = (tipo) => state.data.categorias.filter((c) => !tipo || c.tipo === tipo).map((c) => ({ value: c.id, label: c.nombre }));
@@ -141,7 +142,7 @@ export function renderRecurrentes(root) {
     monto.addEventListener('change', () => { if (inst) { inst.monto = monto.getValue(); inst.montoManual = true; save(); pintarResumen(); } });
     const estado = inst
       ? h('button', { class: 'btn paid-btn' + (inst.estado === 'pagado' ? ' is-paid' : ''), title: inst.estado === 'pagado' ? 'Clic para volver a pendiente' : 'Marcar como pagado',
-        onclick: () => { marcarPagado(inst.id, inst.estado !== 'pagado'); hooks.rerender(); } },
+        onclick: () => { if (inst.estado === 'pagado') desmarcarPago(inst); else pagarMov(inst); } },
       inst.estado === 'pagado' ? `Pagado ✓ ${dayShort(inst.fecha)}` : 'Marcar pagado')
       : h('span', { class: 'muted' }, 'No incluido');
     return h('div', { class: 'rec-row' + (inst ? '' : ' off') },
@@ -168,7 +169,7 @@ export function renderRecurrentes(root) {
 let ultimoTipo = 'variable';
 let enfocarConcepto = false;
 
-function movForm(ini) {
+export function movForm(ini) {
   let tipo = ini.tipo || ultimoTipo;
   const fFecha = h('input', { type: 'date', value: ini.fecha || defaultDate() });
   const fConcepto = h('input', { type: 'text', value: ini.concepto || '', placeholder: 'Ej. Mercado Cañaveral', list: 'dl-conceptos', autocomplete: 'off' });
@@ -176,6 +177,10 @@ function movForm(ini) {
   let fCat = select(catOpts(tipo), ini.categoria || catOpts(tipo)[0]?.value);
   const fCentro = select(centroOpts(), ini.centro || (state.centro === 'todos' ? 'hogar' : state.centro));
   const fMedio = select([{ value: '', label: '—' }, ...state.data.medios.map((m) => ({ value: m, label: m }))], ini.medio || '');
+  // De qué cuenta salió la plata: se descuenta de "Tengo hoy" en el Plan del mes (efectivo y tarjeta no descuentan de una cuenta).
+  const cuentaOk = (id) => (state.data.cuentasDinero.some((c) => c.id === id) ? id : '');
+  const fCuenta = selectorCuenta(ini.id ? cuentaOk(ini.cuentaId) : (esMedioSinCuenta(ini.medio) ? '' : cuentaSugerida('gasto', ini.concepto)), 'gasto');
+  fMedio.addEventListener('change', () => { fCuenta.value = esMedioSinCuenta(fMedio.value) ? '' : (fCuenta.value || cuentaSugerida('gasto', '')); });
   const fNota = h('input', { type: 'text', value: ini.nota || '', placeholder: 'Opcional' });
   const fComp = select([{ value: '', label: '— Ninguno —' }, ...[...state.data.compromisos].sort((a, b) => a.fecha.localeCompare(b.fecha)).map((c) => ({ value: c.id, label: c.nombre }))], ini.compromisoId || '');
   const fEstado = select([{ value: 'pagado', label: 'Pagado' }, { value: 'pendiente', label: 'Pendiente' }], ini.estado || 'pagado');
@@ -201,6 +206,7 @@ function movForm(ini) {
     if (!fMonto.getValue()) fMonto.value = num(prev.monto);
     fCentro.value = prev.centro;
     fMedio.value = prev.medio || '';
+    fCuenta.value = esMedioSinCuenta(prev.medio) ? '' : (cuentaOk(prev.cuentaId) || cuentaSugerida('gasto', prev.concepto));
   });
 
   const lista = [...new Set(state.data.movimientos.map((m) => m.concepto))].slice(-80);
@@ -213,6 +219,7 @@ function movForm(ini) {
     field('Categoría', catWrap),
     field('Centro', fCentro),
     field('Medio de pago', fMedio),
+    state.data.cuentasDinero.length ? field('Pagado desde (se descuenta de "Tengo hoy")', fCuenta, 'wide') : null,
     state.data.compromisos.length ? field('Compromiso (paseo, cumpleaños…)', fComp) : null,
     ini.id ? field('Estado', fEstado) : null,
     field('Nota', fNota, 'wide full'),
@@ -223,7 +230,7 @@ function movForm(ini) {
     if (!fFecha.value) return 'Elige la fecha.';
     return {
       fecha: fFecha.value, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo, categoria: fCat.value,
-      centro: fCentro.value, medio: fMedio.value, nota: fNota.value.trim(), compromisoId: fComp.value || undefined, ...(ini.id ? { estado: fEstado.value } : {}),
+      centro: fCentro.value, medio: fMedio.value, nota: fNota.value.trim(), compromisoId: fComp.value || undefined, cuentaId: fCuenta.value || undefined, ...(ini.id ? { estado: fEstado.value } : {}),
     };
   };
   const reset = () => { fConcepto.value = ''; fMonto.value = ''; fNota.value = ''; };
@@ -248,8 +255,9 @@ export function renderMovimientos(root) {
     if (typeof r === 'string') { toast(r); return; }
     ultimoTipo = r.tipo;
     addMov(r);
+    recordarCuenta('gasto', r.concepto, r.cuentaId);
     enfocarConcepto = true;
-    toast('Agregado: ' + r.concepto);
+    toast(avisoCuenta('gasto', r.monto, r.cuentaId) || 'Agregado: ' + r.concepto);
     hooks.rerender();
   };
   const formCard = h('section', { class: 'card' },
@@ -261,7 +269,7 @@ export function renderMovimientos(root) {
   const editar = (m) => {
     const f = movForm(m);
     modal('Editar movimiento', f.nodes, {
-      onSave: () => { const r = f.read(); if (typeof r === 'string') return r; updateMov(m.id, r); hooks.rerender(); },
+      onSave: () => { const r = f.read(); if (typeof r === 'string') return r; updateMov(m.id, r); recordarCuenta('gasto', r.concepto, r.cuentaId); hooks.rerender(); },
       peligro: { label: 'Eliminar', fn: () => { delMov(m.id); hooks.rerender(); } },
     });
   };
@@ -284,10 +292,10 @@ export function renderMovimientos(root) {
           h('td', {}, categoria(m.categoria)?.nombre || m.categoria),
           h('td', {}, tipoDot(m.tipo)),
           h('td', {}, centroNombre(m.centro)),
-          h('td', {}, m.medio || '—'),
+          h('td', {}, m.medio || '—', m.cuentaId && m.estado === 'pagado' && nombreCuenta(m.cuentaId) ? h('div', { class: 'card-sub' }, '↳ ' + nombreCuenta(m.cuentaId)) : null),
           h('td', { class: 'r' }, money(m.monto)),
           h('td', {}, m.estado === 'pendiente'
-            ? h('button', { class: 'chip', title: 'Marcar como pagado', onclick: () => { marcarPagado(m.id, true); hooks.rerender(); } }, 'Pendiente · pagar')
+            ? h('button', { class: 'chip', title: 'Marcar como pagado', onclick: () => pagarMov(m) }, 'Pendiente · pagar')
             : h('span', { class: 'muted' }, 'Pagado')),
           h('td', {}, h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + m.concepto, onclick: () => editar(m) }, '✎'))))),
         h('tfoot', {}, h('tr', {}, h('td', { colspan: 6 }, `${lista.length} movimiento${lista.length === 1 ? '' : 's'}`), h('td', { class: 'r' }, money(sum(lista))), h('td'), h('td')))))
@@ -343,25 +351,31 @@ function editarFuente(f, tipoPorDefecto = 'recurrente') {
   });
 }
 
-function ingresoForm(ini) {
+export function ingresoForm(ini) {
   const fFecha = h('input', { type: 'date', value: ini.fecha || defaultDate() });
   const fFuente = h('input', { type: 'text', value: ini.fuente || '', placeholder: 'Ej. VEC', list: 'dl-fuentes', autocomplete: 'off' });
   const fMonto = moneyInput(ini.monto);
   const fCentro = select(centroOpts(), ini.centro || (state.centro === 'todos' ? 'hogar' : state.centro));
   const fNota = h('input', { type: 'text', value: ini.nota || '', placeholder: 'Opcional' });
+  // En qué cuenta entró la plata: se suma a "Tengo hoy" en el Plan del mes.
+  const cuentaOk = (id) => (state.data.cuentasDinero.some((c) => c.id === id) ? id : '');
+  const fCuenta = selectorCuenta(ini.id ? cuentaOk(ini.cuentaId) : cuentaSugerida('ingreso', ini.fuente), 'ingreso');
   fFuente.addEventListener('change', () => {
     const f = state.data.fuentesIngreso.find((x) => x.nombre.toLowerCase() === fFuente.value.trim().toLowerCase());
     if (f) { if (!fMonto.getValue()) fMonto.value = num(f.monto); fCentro.value = f.centro; }
+    if (!ini.id) fCuenta.value = cuentaSugerida('ingreso', fFuente.value);
   });
   const nodes = [
     h('datalist', { id: 'dl-fuentes' }, state.data.fuentesIngreso.map((f) => h('option', { value: f.nombre }))),
-    field('Fecha', fFecha), field('Fuente', fFuente, 'wide full'), field('Monto', fMonto), field('Centro', fCentro), field('Nota', fNota, 'wide full'),
+    field('Fecha', fFecha), field('Fuente', fFuente, 'wide full'), field('Monto', fMonto), field('Centro', fCentro),
+    state.data.cuentasDinero.length ? field('¿En qué cuenta entró? (se suma a "Tengo hoy")', fCuenta, 'wide full') : null,
+    field('Nota', fNota, 'wide full'),
   ];
   const read = () => {
     if (!fFuente.value.trim()) return 'Escribe la fuente.';
     if (!fMonto.getValue()) return 'Escribe el monto.';
     if (!fFecha.value) return 'Elige la fecha.';
-    return { fecha: fFecha.value, fuente: fFuente.value.trim(), monto: fMonto.getValue(), centro: fCentro.value, nota: fNota.value.trim() };
+    return { fecha: fFecha.value, fuente: fFuente.value.trim(), monto: fMonto.getValue(), centro: fCentro.value, nota: fNota.value.trim(), cuentaId: fCuenta.value || undefined };
   };
   return { nodes, read };
 }
@@ -371,14 +385,19 @@ function registrarPago(mes, r) {
   const fFecha = h('input', { type: 'date', value: hoy.slice(0, 7) === mes ? hoy : mes + '-01' });
   const fMonto = moneyInput(r.falta || r.esperado || 0);
   const fNota = h('input', { type: 'text', placeholder: 'Opcional' });
+  const fCuenta = selectorCuenta(cuentaSugerida('ingreso', r.nombre), 'ingreso');
   modal('Registrar pago recibido de ' + r.nombre, [
-    field('Fecha', fFecha), field('Monto recibido', fMonto), field('Nota', fNota, 'full'),
+    field('Fecha', fFecha), field('Monto recibido', fMonto),
+    state.data.cuentasDinero.length ? field('¿En qué cuenta entró? (se suma a "Tengo hoy")', fCuenta, 'full') : null,
+    field('Nota', fNota, 'full'),
     h('div', { class: 'card-sub full' }, r.esperado ? `Esperado ${money(r.esperado)} · ya recibido ${money(r.recibido)} · falta ${money(r.falta)}` : 'Este ingreso no tenía un valor esperado.'),
   ], {
     onSave: () => {
       if (!fMonto.getValue()) return 'Escribe el monto.';
       if (!fFecha.value) return 'Elige la fecha.';
-      addIngreso({ fecha: fFecha.value, fuente: r.nombre, monto: fMonto.getValue(), centro: r.centro, nota: fNota.value.trim(), mesPlan: mes });
+      addIngreso({ fecha: fFecha.value, fuente: r.nombre, monto: fMonto.getValue(), centro: r.centro, nota: fNota.value.trim(), mesPlan: mes, cuentaId: fCuenta.value || undefined });
+      recordarCuenta('ingreso', r.nombre, fCuenta.value);
+      toast(avisoCuenta('ingreso', fMonto.getValue(), fCuenta.value) || 'Pago registrado');
       hooks.rerender();
     },
   });
@@ -516,7 +535,7 @@ export function renderIngresos(root) {
   const editar = (i) => {
     const f = ingresoForm(i);
     modal('Editar ingreso', f.nodes, {
-      onSave: () => { const r = f.read(); if (typeof r === 'string') return r; updateIngreso(i.id, r); hooks.rerender(); },
+      onSave: () => { const r = f.read(); if (typeof r === 'string') return r; updateIngreso(i.id, r); recordarCuenta('ingreso', r.fuente, r.cuentaId); hooks.rerender(); },
       peligro: { label: 'Eliminar', fn: () => { delIngreso(i.id); hooks.rerender(); } },
     });
   };
@@ -526,7 +545,7 @@ export function renderIngresos(root) {
       ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
         h('thead', {}, h('tr', {}, ['Fecha', 'Fuente', 'Centro', 'Nota'].map((t) => h('th', {}, t)), h('th', { class: 'r' }, 'Monto'), h('th'))),
         h('tbody', {}, pagos.map((i) => h('tr', {},
-          h('td', { class: 'num' }, dayShort(i.fecha)), h('td', {}, i.fuente), h('td', {}, centroNombre(i.centro)), h('td', { class: 'muted' }, i.nota),
+          h('td', { class: 'num' }, dayShort(i.fecha)), h('td', {}, i.fuente, i.cuentaId && nombreCuenta(i.cuentaId) ? h('div', { class: 'card-sub' }, '↳ entró a ' + nombreCuenta(i.cuentaId)) : null), h('td', {}, centroNombre(i.centro)), h('td', { class: 'muted' }, i.nota),
           h('td', { class: 'r' }, money(i.monto)),
           h('td', {}, h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + i.fuente, onclick: () => editar(i) }, '✎'))))),
         h('tfoot', {}, h('tr', {}, h('td', { colspan: 4 }, 'Total recibido'), h('td', { class: 'r' }, money(sum(pagos))), h('td')))))
@@ -537,7 +556,8 @@ export function renderIngresos(root) {
         const r = form.read();
         if (typeof r === 'string') { toast(r); return; }
         addIngreso(r);
-        toast('Ingreso agregado');
+        recordarCuenta('ingreso', r.fuente, r.cuentaId);
+        toast(avisoCuenta('ingreso', r.monto, r.cuentaId) || 'Ingreso agregado');
         hooks.rerender();
       } }, ...form.nodes, h('button', { type: 'submit', class: 'btn primary', style: { height: '34px' } }, 'Agregar'))));
 

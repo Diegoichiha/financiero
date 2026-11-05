@@ -1,4 +1,5 @@
 // Pantalla Resumen: cifras clave + gráficas para ver "cómo vamos".
+import { pagarMov } from './cuentas-enlace.js';
 import {
   h, money, moneyCompact, pct, todayISO, daysBetween, addDays, addMonths, monthStart, monthEnd, weekStart,
   daysInMonth, parse, dowIndex, DIAS_C, MESES_C, monthName, dayShort, rangeLabel, isoWeek, iso,
@@ -124,7 +125,7 @@ export function renderResumen(root) {
               cu ? h('button', { class: 'btn ghost sm', title: 'Copiar número de cuenta', onclick: () => copiar(cu.referencia) }, `${cu.referencia} ⧉`) : null)),
           h('div', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } },
             h('span', { class: 'amt num' }, money(m.monto)),
-            h('button', { class: 'btn sm', title: 'Marcar como pagado', 'aria-label': 'Marcar como pagado ' + m.concepto, onclick: () => { marcarPagado(m.id, true); hooks.rerender(); } }, '✓')));
+            h('button', { class: 'btn sm', title: 'Marcar como pagado', 'aria-label': 'Marcar como pagado ' + m.concepto, onclick: () => pagarMov(m) }, '✓')));
       }))
       : h('div', { class: 'muted' }, 'No hay pagos pendientes en este periodo.'),
     pendientes.length > 7 ? h('button', { class: 'btn ghost sm', onclick: () => hooks.goTab('recurrentes') }, `Ver los ${pendientes.length} en Recurrentes`) : null);

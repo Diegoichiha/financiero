@@ -535,46 +535,90 @@ export const hayDatos = () => state.data.movimientos.length > 0 || state.data.in
 export const hayDemo = () => state.data.movimientos.some((m) => m.demo) || state.data.ingresos.some((i) => i.demo);
 
 // ---------- Movimientos e ingresos ----------
+// Conexión con "Tengo hoy" (Plan del mes): un ingreso con cuenta SUMA a esa cuenta y un pago hecho con cuenta RESTA.
+// Se deshace solo al editar, borrar o volver un pago a pendiente. Lo que no tiene cuenta no mueve ningún saldo.
+const redondear = (n) => Math.round(n * 100) / 100;
+const efectoIngreso = (i) => (i && i.cuentaId ? { id: i.cuentaId, d: Number(i.monto) || 0 } : null);
+const efectoMov = (m) => (m && m.cuentaId && m.estado === 'pagado' ? { id: m.cuentaId, d: -(Number(m.monto) || 0) } : null);
+function moverSaldo(e, signo) {
+  if (!e) return;
+  const c = state.data.cuentasDinero.find((x) => x.id === e.id);
+  if (!c) return;
+  c.saldo = redondear((Number(c.saldo) || 0) + signo * e.d);
+  c.fecha = todayISO();
+}
+export const cuentaDinero = (id) => state.data.cuentasDinero.find((c) => c.id === id);
+
+// Cuenta que se propone al registrar algo: la última usada con esa fuente o concepto, o la última del tipo, o la primera.
+export function cuentaSugerida(tipo, clave) {
+  const cfg = state.data.config.cuentaPorDefecto || {};
+  const ids = state.data.cuentasDinero.map((c) => c.id);
+  const buscada = [clave ? cfg[`${tipo}:${String(clave).trim().toLowerCase()}`] : null, cfg[tipo]].find((x) => x && ids.includes(x));
+  return buscada || ids[0] || '';
+}
+export function recordarCuenta(tipo, clave, id) {
+  if (!id) return;
+  const cfg = (state.data.config.cuentaPorDefecto ||= {});
+  cfg[tipo] = id;
+  if (clave) cfg[`${tipo}:${String(clave).trim().toLowerCase()}`] = id;
+}
+
 export function addMov(m) {
   const mov = { id: uid(), estado: 'pagado', medio: '', nota: '', ...m };
   state.data.movimientos.push(mov);
+  moverSaldo(efectoMov(mov), +1);
   save();
   return mov;
 }
 export function updateMov(id, patch) {
   const m = state.data.movimientos.find((x) => x.id === id);
-  if (m) Object.assign(m, patch);
+  if (m) {
+    const antes = efectoMov(m);
+    Object.assign(m, patch);
+    moverSaldo(antes, -1); // se deshace lo anterior…
+    moverSaldo(efectoMov(m), +1); // …y se aplica lo nuevo
+  }
   save();
 }
-// Al pagar, la fecha pasa a ser la real (hoy) si el pago corresponde al mes en curso.
-export function marcarPagado(id, pagado) {
+// Al pagar, la fecha pasa a ser la real (hoy) si el pago corresponde al mes en curso. `cuentaId` = de qué cuenta salió ('' = de ninguna).
+export function marcarPagado(id, pagado, cuentaId) {
   const m = state.data.movimientos.find((x) => x.id === id);
   if (!m) return;
   if (pagado) {
     const hoy = todayISO();
     const mismoMes = hoy.slice(0, 7) === (m.mes || m.fecha.slice(0, 7));
-    updateMov(id, { estado: 'pagado', fecha: mismoMes ? hoy : m.fecha });
+    updateMov(id, { estado: 'pagado', fecha: mismoMes ? hoy : m.fecha, ...(cuentaId !== undefined ? { cuentaId: cuentaId || undefined } : {}) });
   } else {
     updateMov(id, { estado: 'pendiente' });
   }
 }
 export function delMov(id) {
-  state.data.movimientos = state.data.movimientos.filter((m) => m.id !== id);
+  const m = state.data.movimientos.find((x) => x.id === id);
+  if (m) moverSaldo(efectoMov(m), -1);
+  state.data.movimientos = state.data.movimientos.filter((x) => x.id !== id);
   save();
 }
 export function addIngreso(i) {
   const ing = { id: uid(), nota: '', ...i };
   state.data.ingresos.push(ing);
+  moverSaldo(efectoIngreso(ing), +1);
   save();
   return ing;
 }
 export function updateIngreso(id, patch) {
   const i = state.data.ingresos.find((x) => x.id === id);
-  if (i) Object.assign(i, patch);
+  if (i) {
+    const antes = efectoIngreso(i);
+    Object.assign(i, patch);
+    moverSaldo(antes, -1);
+    moverSaldo(efectoIngreso(i), +1);
+  }
   save();
 }
 export function delIngreso(id) {
-  state.data.ingresos = state.data.ingresos.filter((i) => i.id !== id);
+  const i = state.data.ingresos.find((x) => x.id === id);
+  if (i) moverSaldo(efectoIngreso(i), -1);
+  state.data.ingresos = state.data.ingresos.filter((x) => x.id !== id);
   save();
 }
 
@@ -761,7 +805,7 @@ function planCajaInterno() {
     for (const r of ingresosDelMes(m)) {
       for (const p of r.cobrosPend) {
         if (p.fecha > fin) continue;
-        const e = { fecha: desde(p.fecha), concepto: r.nombre, clase: 'ingreso', monto: p.monto, aprox: !!p.aprox };
+        const e = { fecha: desde(p.fecha), concepto: r.nombre, clase: 'ingreso', monto: p.monto, aprox: !!p.aprox, fuente: r.nombre, mesPlan: m, centro: r.centro };
         if (p.fecha < corte) ev.push(e); else evProx.push(e);
       }
     }
@@ -770,8 +814,8 @@ function planCajaInterno() {
 
   const pendTodos = D.movimientos.filter((m) => m.estado === 'pendiente' && m.fecha <= limite && centroOk(m.centro) && (D.config.incluirCuotaCarro || m.categoria !== 'carro') && !m.compromisoId);
   const pend = pendTodos.filter((m) => m.fecha < corte);
-  for (const m of pend) ev.push({ fecha: desde(m.fecha), concepto: m.concepto, clase: 'fijo', monto: -m.monto });
-  for (const m of pendTodos.filter((x) => x.fecha >= corte)) evProx.push({ fecha: desde(m.fecha), concepto: m.concepto, clase: 'fijo', monto: -m.monto });
+  for (const m of pend) ev.push({ fecha: desde(m.fecha), concepto: m.concepto, clase: 'fijo', monto: -m.monto, movId: m.id });
+  for (const m of pendTodos.filter((x) => x.fecha >= corte)) evProx.push({ fecha: desde(m.fecha), concepto: m.concepto, clase: 'fijo', monto: -m.monto, movId: m.id });
   const fijosPend = sum(pend);
 
   // Mercado que falta: se reparte en los sábados que quedan del mes.

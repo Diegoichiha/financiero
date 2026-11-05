@@ -4,7 +4,7 @@ import {
   h, money, uid, todayISO, daysBetween, addMonths, parse, MESES_C, monthName, dayShort, pct,
 } from './util.js';
 import {
-  state, hooks, saveCompromiso, delCompromiso, compromisoGastado, margenMes, addMov, sum, categoria, planCaja,
+  state, hooks, cuentaSugerida, recordarCuenta, saveCompromiso, delCompromiso, compromisoGastado, margenMes, addMov, sum, categoria, planCaja,
 } from './store.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
 
@@ -48,21 +48,27 @@ function modalCompromiso(c) {
   });
 }
 
+import { selectorCuenta, esMedioSinCuenta, avisoCuenta } from './cuentas-enlace.js';
+
 function modalGasto(c) {
   const fFecha = h('input', { type: 'date', value: todayISO() });
   const fConcepto = h('input', { type: 'text', value: '', placeholder: 'Ej. Regalo, pasajes, comida…' });
   const fMonto = moneyInput(0);
   const fCat = select(state.data.categorias.filter((x) => x.tipo !== 'recurrente').map((x) => ({ value: x.id, label: x.nombre })), 'otros-var');
   const fMedio = select([{ value: '', label: '—' }, ...state.data.medios.map((m) => ({ value: m, label: m }))], '');
+  const fCuenta = selectorCuenta(cuentaSugerida('gasto', ''), 'gasto');
+  fMedio.addEventListener('change', () => { fCuenta.value = esMedioSinCuenta(fMedio.value) ? '' : (fCuenta.value || cuentaSugerida('gasto', '')); });
   modal('Gasto de «' + c.nombre + '»', [
     field('Fecha', fFecha), field('Valor', fMonto), field('Concepto', fConcepto, 'full'), field('Categoría', fCat), field('Medio de pago', fMedio),
+    state.data.cuentasDinero.length ? field('Pagado desde (se descuenta de "Tengo hoy")', fCuenta, 'full') : null,
     h('div', { class: 'card-sub full' }, `Presupuesto ${money(c.presupuesto)} · gastado ${money(compromisoGastado(c.id))}`),
   ], {
     onSave: () => {
       if (!fConcepto.value.trim()) return 'Escribe el concepto.';
       if (!fMonto.getValue()) return 'Escribe el valor.';
-      addMov({ fecha: fFecha.value, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo: 'variable', categoria: fCat.value, centro: 'hogar', medio: fMedio.value, compromisoId: c.id });
-      toast('Gasto agregado a ' + c.nombre);
+      addMov({ fecha: fFecha.value, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo: 'variable', categoria: fCat.value, centro: 'hogar', medio: fMedio.value, compromisoId: c.id, cuentaId: fCuenta.value || undefined });
+      recordarCuenta('gasto', '', fCuenta.value);
+      toast(avisoCuenta('gasto', fMonto.getValue(), fCuenta.value) || 'Gasto agregado a ' + c.nombre);
       hooks.rerender();
     },
   });

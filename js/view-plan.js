@@ -8,6 +8,9 @@ import {
 } from './store.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
 import { card, lineaSaldo } from './charts.js';
+import { movForm, ingresoForm } from './view-lists.js';
+import { pagarMov, avisoCuenta } from './cuentas-enlace.js';
+import { addIngreso, addMov, recordarCuenta } from './store.js';
 import { TIPOS_COMPROMISO } from './view-compromisos.js';
 
 const CLASES = {
@@ -82,6 +85,37 @@ function modalRutina(r) {
   });
 }
 
+// Registrar plata recibida desde el mismo plan: se elige la cuenta y "Tengo hoy" sube de una vez.
+function modalIngresoRapido(ini = {}, extra = {}) {
+  const f = ingresoForm(ini);
+  modal(ini.fuente ? 'Recibí el pago de ' + ini.fuente : 'Registrar plata recibida', f.nodes, {
+    guardar: 'Registrar',
+    onSave: () => {
+      const r = f.read();
+      if (typeof r === 'string') return r;
+      addIngreso({ ...r, ...extra });
+      recordarCuenta('ingreso', r.fuente, r.cuentaId);
+      toast(avisoCuenta('ingreso', r.monto, r.cuentaId) || 'Ingreso registrado');
+      hooks.rerender();
+    },
+  });
+}
+// Registrar un gasto desde el mismo plan: se elige la cuenta y "Tengo hoy" baja de una vez.
+function modalGastoRapido() {
+  const f = movForm({});
+  modal('Registrar un gasto', f.nodes, {
+    guardar: 'Registrar',
+    onSave: () => {
+      const r = f.read();
+      if (typeof r === 'string') return r;
+      addMov(r);
+      recordarCuenta('gasto', r.concepto, r.cuentaId);
+      toast(avisoCuenta('gasto', r.monto, r.cuentaId) || 'Gasto registrado');
+      hooks.rerender();
+    },
+  });
+}
+
 export function renderPlan(root) {
   const p = planCaja();
   const mesN = monthName(p.mes + '-01').split(' ')[0].toLowerCase();
@@ -93,8 +127,8 @@ export function renderPlan(root) {
   const hastaDia = Number(p.finGasto.slice(8)); // último día que cubre el plan (el 29)
   const stat = (label, valor, sub) => h('div', { class: 'stat' }, h('div', { class: 'tile-label' }, label), h('div', { class: 'tile-value num' }, money(valor)), sub ? h('div', { class: 'card-sub num' }, sub) : null);
   const grande = (valor, mal) => h('div', { class: 'hero-value num' + (mal ? ' neg' : ''), style: { fontSize: '34px' } }, money(valor));
-  const fila = (nombre, meta, valor) => h('div', { class: 'list-item' },
-    h('div', {}, h('div', { class: 'name' }, nombre), meta ? h('div', { class: 'meta' }, meta) : null),
+  const fila = (nombre, meta, valor, accion) => h('div', { class: 'list-item' },
+    h('div', {}, h('div', { class: 'name' }, nombre), meta || accion ? h('div', { class: 'meta' }, meta, accion || null) : null),
     h('span', { class: 'amt num' }, money(valor)));
 
   const filaCuenta = (c) => {
@@ -109,7 +143,11 @@ export function renderPlan(root) {
     h('div', { class: 'card-head' }, h('div', {}, h('div', { class: 'card-title' }, 'Tengo hoy'), h('div', { class: 'card-sub' }, 'Actualiza el saldo cuando quieras')),
       h('button', { class: 'btn sm', onclick: () => modalCuenta() }, '+ Cuenta')),
     grande(p.saldo, p.saldo < 0),
-    p.cuentas.length ? h('div', {}, p.cuentas.map(filaCuenta)) : h('div', { class: 'muted' }, 'Agrega tus cuentas y billeteras para saber con cuánto cuentas hoy.'));
+    p.cuentas.length ? h('div', {}, p.cuentas.map(filaCuenta)) : h('div', { class: 'muted' }, 'Agrega tus cuentas y billeteras para saber con cuánto cuentas hoy.'),
+    h('div', { class: 'card-sub' }, 'Este saldo se mueve solo: sube con lo que recibes y baja con lo que pagas, según la cuenta que elijas al registrarlo.'),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn sm primary', onclick: () => modalIngresoRapido() }, '+ Recibí plata'),
+      h('button', { class: 'btn sm', onclick: () => modalGastoRapido() }, '+ Registré un gasto')));
 
   const ingresosLista = p.eventos.filter((e) => e.clase === 'ingreso');
   const cRecibir = h('section', { class: 'card w2 det', style: '--c: var(--s3)' },
@@ -117,7 +155,8 @@ export function renderPlan(root) {
     grande(p.ingresosPend),
     p.proximo.entra > 0 ? h('div', { class: 'card-sub num' }, `Lo que entra el ${diaFin} (${money(p.proximo.entra)}) ya es de ${p.sigNombre}: no cuenta para ${mesN}.`) : null,
     ingresosLista.length
-      ? h('div', {}, ingresosLista.map((e) => fila(e.concepto, dayShort(e.fecha) + (e.aprox ? ' · fecha aproximada' : ''), e.monto)))
+      ? h('div', {}, ingresosLista.map((e) => fila(e.concepto, dayShort(e.fecha) + (e.aprox ? ' · fecha aproximada' : ''), e.monto,
+        h('button', { class: 'btn ghost sm', title: 'Registrar que ya lo recibí y elegir la cuenta', onclick: () => modalIngresoRapido({ fuente: e.fuente || e.concepto, monto: e.monto, centro: e.centro }, { mesPlan: e.mesPlan }) }, 'Ya lo recibí'))))
       : h('div', { class: 'muted' }, 'No hay ingresos pendientes. Agrégalos en la pestaña Ingresos.'));
 
   const pagosLista = p.eventos.filter((e) => e.clase === 'fijo');
@@ -129,7 +168,8 @@ export function renderPlan(root) {
       pagosMes > 0 ? fila(`Pagos recurrentes de ${mesN}`, `${nPagosMes} pago${nPagosMes === 1 ? '' : 's'}`, pagosMes) : null,
       fila('Mercado que falta', `Presupuesto ${money(p.mercado.presupuesto)} − ya gastado ${money(p.mercado.gastado)}`, p.mercadoRest)),
     pagosLista.length ? h('details', {}, h('summary', {}, 'Ver cada pago'),
-      pagosLista.map((e) => fila(e.concepto, dayShort(e.fecha), -e.monto))) : null,
+      pagosLista.map((e) => fila(e.concepto, dayShort(e.fecha), -e.monto,
+        e.movId ? h('button', { class: 'btn ghost sm', title: 'Marcar como pagado y elegir la cuenta', onclick: () => { const mv = state.data.movimientos.find((x) => x.id === e.movId); if (mv) pagarMov(mv); } }, 'Ya lo pagué') : null))) : null,
     p.proximo.sale > 0 ? h('div', { class: 'card-sub num' }, `Los pagos desde el ${diaFin} (${money(p.proximo.sale)}: tarjeta, carro…) se pagan con lo que entra ese día, no con el dinero de ${mesN}.`) : null);
 
   // ---- La cuenta del mes en una sola mirada: tengo + espero − pago − colchón = puedes gastar, y en qué se va ----
