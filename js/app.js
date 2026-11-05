@@ -15,6 +15,7 @@ import { icon } from './icons.js';
 import { renderGuia } from './view-guia.js';
 import { pantallaLogin, pantallaClave, post } from './login.js';
 import { switchTema, esOscuro } from './tema.js';
+import { botonMarca } from './marca.js';
 
 const TABS = [
   { id: 'resumen', n: 'Resumen', ico: 'resumen', eyebrow: 'Panorama', filtros: true, render: renderResumen },
@@ -56,11 +57,32 @@ function build() {
   refs.head = h('header', { class: 'page-head' });
   refs.filters = h('div', { class: 'filters' });
   refs.main = h('main', { id: 'main' });
-  app.replaceChildren(h('div', { class: 'app' },
+  // Botón para cerrar el panel (queda solo con los iconos) y volver a abrirlo; se recuerda la elección.
+  refs.menuBtn = h('button', { type: 'button', class: 'menu-toggle', onclick: () => cambiarPanel() }, icon('panel', 18));
+  refs.shell = h('div', { class: 'app' },
     h('aside', { class: 'side' },
-      h('button', { type: 'button', class: 'brand', title: 'Ir al inicio', 'aria-label': 'Hogy Financiero: ir al inicio', onclick: () => { state.tab = 'resumen'; render(); window.scrollTo(0, 0); } }, h('span', { class: 'brand-word' }, 'Hogy Financiero'), h('i', { class: 'brand-dot' })),
+      h('div', { class: 'side-top' },
+        botonMarca(() => { state.tab = 'resumen'; render(); window.scrollTo(0, 0); }, 'Ir al inicio'),
+        refs.menuBtn),
       refs.tabs),
-    h('div', { class: 'content' }, refs.banner, refs.head, refs.filters, refs.main)));
+    h('div', { class: 'content' }, refs.banner, refs.head, refs.filters, refs.main));
+  app.replaceChildren(refs.shell);
+  aplicarPanel();
+}
+
+const PANEL = 'finanzas-panel';
+let panelCerrado = localStorage.getItem(PANEL) === 'cerrado';
+function aplicarPanel() {
+  refs.shell.classList.toggle('colapsado', panelCerrado);
+  refs.menuBtn.setAttribute('aria-expanded', String(!panelCerrado));
+  const txt = panelCerrado ? 'Abrir el panel' : 'Cerrar el panel (dejar solo los iconos)';
+  refs.menuBtn.title = txt;
+  refs.menuBtn.setAttribute('aria-label', txt);
+}
+function cambiarPanel() {
+  panelCerrado = !panelCerrado;
+  localStorage.setItem(PANEL, panelCerrado ? 'cerrado' : 'abierto');
+  aplicarPanel();
 }
 
 hooks.saveStatus = (st) => {
@@ -74,7 +96,7 @@ hooks.goTab = (id) => { state.tab = id; render(); };
 // ---------- Pintado ----------
 function renderTabs() {
   refs.tabs.replaceChildren(...TABS.map((t) => h('button', {
-    class: 'tab', role: 'tab', 'aria-selected': String(t.id === state.tab),
+    class: 'tab', role: 'tab', 'aria-selected': String(t.id === state.tab), title: t.n, 'aria-label': t.n,
     onclick: () => { if (state.tab !== t.id) { state.tab = t.id; render(); } },
   }, icon(t.ico, 20), h('span', { class: 'tab-n' }, t.n))));
 }

@@ -1,6 +1,7 @@
 // Pantallas de acceso: ingreso con usuario y contraseña, y cambio de contraseña.
 import { h } from './util.js';
 import { switchTema } from './tema.js';
+import { botonMarca } from './marca.js';
 
 export async function post(url, cuerpo) {
   const r = await fetch(url, { method: 'POST', headers: { 'X-Requested-With': 'finanzas', 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo || {}) });
@@ -13,7 +14,7 @@ export async function post(url, cuerpo) {
 function marco(root, titulo, eyebrow, alInicio, ...contenido) {
   root.replaceChildren(h('div', { class: 'auth' },
     h('div', { class: 'auth-top' },
-      h('button', { type: 'button', class: 'brand', title: 'Volver al inicio', 'aria-label': 'Hogy Financiero: volver al inicio', onclick: alInicio }, h('span', { class: 'brand-word' }, 'Hogy Financiero'), h('i', { class: 'brand-dot' })),
+      botonMarca(alInicio),
       switchTema()),
     h('form', { class: 'auth-card', novalidate: true },
       h('div', { class: 'eyebrow' }, h('i', { class: 'eb-line' }), eyebrow),
