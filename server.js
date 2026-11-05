@@ -22,6 +22,7 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.png': 'image/png',
 };
 
 const stamp = () => {
@@ -91,7 +92,7 @@ function send(res, code, body, headers = {}) {
 function serveStatic(req, res, pathname) {
   let rel = pathname === '/' ? '/index.html' : pathname;
   rel = decodeURIComponent(rel);
-  const allowed = rel === '/index.html' || rel.startsWith('/css/') || rel.startsWith('/js/') || rel.startsWith('/fonts/');
+  const allowed = rel === '/index.html' || rel.startsWith('/css/') || rel.startsWith('/js/') || rel.startsWith('/fonts/') || rel.startsWith('/icons/');
   const file = path.normalize(path.join(ROOT, rel));
   if (!allowed || !file.startsWith(ROOT + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
     return send(res, 404, 'No encontrado', { 'Content-Type': 'text/plain; charset=utf-8' });
