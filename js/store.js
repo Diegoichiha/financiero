@@ -2,7 +2,7 @@
 import {
   uid, pad, parse, monthName, MESES_C, todayISO, monthStart, monthEnd, addDays, addMonths, weekStart, daysInMonth, mulberry32,
 } from './util.js';
-import { extractoPagadoEn } from './creditos.js';
+import { extractoPagadoEn, corteDeFecha, pagoDeCorte } from './creditos.js';
 
 export const TIPOS = [
   { id: 'recurrente', nombre: 'Recurrentes', corto: 'Recurrente', cssVar: 'var(--s1)' },
@@ -804,7 +804,7 @@ function planCajaInterno() {
   for (const m of rodado ? [prevMes, mes, sigMes] : [mes, sigMes]) {
     for (const r of ingresosDelMes(m)) {
       for (const p of r.cobrosPend) {
-        if (p.fecha > fin) continue;
+        if (p.fecha > limite) continue; // lo que entra del 1 al 5 del mes siguiente también se muestra (con los pagos de esos días)
         const e = { fecha: desde(p.fecha), concepto: r.nombre, clase: 'ingreso', monto: p.monto, aprox: !!p.aprox, fuente: r.nombre, mesPlan: m, centro: r.centro };
         if (p.fecha < corte) ev.push(e); else evProx.push(e);
       }
@@ -939,15 +939,32 @@ export function saveTarjetaConfig(id, patch) {
   Object.assign(tarjetaById(id), patch);
   save();
 }
+// Compra compartida: el banco cobra TODO en el extracto, pero las otras personas devuelven su parte. Se crea sola una plata esperada
+// ("Reembolso: <concepto>") por lo que te deben, con la fecha del pago de la tarjeta (se puede mover en Ingresos → Fechas).
+function sincronizarReembolso(tj, c) {
+  const D = state.data;
+  const previa = D.planIngresos.find((r) => r.compraId === c.id);
+  if (!(c.partes > 1)) {
+    if (previa) D.planIngresos = D.planIngresos.filter((r) => r !== previa);
+    return;
+  }
+  const pago = pagoDeCorte(c.corte || corteDeFecha(c.fecha, tj), tj);
+  const monto = Math.round((c.monto * (c.partes - 1)) / c.partes);
+  const fecha = previa?.cobros?.[0]?.fecha || pago; // si ya moviste la fecha, se respeta
+  const fila = { mes: previa?.mes || pago.slice(0, 7), nombre: 'Reembolso: ' + c.concepto, tipo: 'variable', centro: 'hogar', esperado: monto, cobros: [{ fecha, monto }], compraId: c.id };
+  if (previa) Object.assign(previa, fila); else D.planIngresos.push({ id: uid(), ...fila });
+}
 export function saveCompraTarjeta(tid, compra) {
   const tj = tarjetaById(tid);
   const i = tj.compras.findIndex((x) => x.id === compra.id);
   if (i >= 0) tj.compras[i] = compra; else tj.compras.push(compra);
+  sincronizarReembolso(tj, compra);
   save();
 }
 export function delCompraTarjeta(tid, id) {
   const tj = tarjetaById(tid);
   tj.compras = tj.compras.filter((x) => x.id !== id);
+  state.data.planIngresos = state.data.planIngresos.filter((r) => r.compraId !== id);
   save();
 }
 export function savePlanTarjeta(tid, plan) {

@@ -27,6 +27,7 @@ function modalCompra(t, existente) {
   const fCuotas = h('input', { type: 'number', min: 1, max: 60, value: 1, disabled: !nueva });
   const fTasa = h('input', { type: 'number', min: 0, step: 0.01, value: 0, placeholder: '0 = sin interés', disabled: !nueva });
   const fCat = select(catOpts(), c.categoria);
+  const fPartes = h('input', { type: 'number', min: 1, max: 10, value: c.partes || 1 });
   const fCuota = moneyInput(0, { disabled: !nueva });
   let cuotaManual = false;
   const info = h('div', { class: 'card-sub full' });
@@ -36,24 +37,28 @@ function modalCompra(t, existente) {
     if (n > 1 && !cuotaManual) fCuota.value = valor ? num(cuotaPmt(valor, n, Number(fTasa.value) || 0)) : '';
     const fecha = fFecha.value || (c.corte ? null : todayISO());
     const corte = fecha ? corteDeFecha(fecha, t) : c.corte;
-    info.textContent = n > 1
+    const partes = Math.max(1, Math.round(Number(fPartes.value) || 1));
+    info.textContent = (n > 1
       ? `${n} cuotas de ${money(fCuota.getValue())}. La primera entra en el extracto del corte ${fechaCorta(corte)} (se paga el ${fechaCorta(pagoDeCorte(corte, t))}).`
-      : `Entra en el extracto del corte ${fechaCorta(corte)} y se paga el ${fechaCorta(pagoDeCorte(corte, t))}.`;
+      : `Entra en el extracto del corte ${fechaCorta(corte)} y se paga el ${fechaCorta(pagoDeCorte(corte, t))}.`)
+      + (partes > 1 && n === 1 && valor ? ` Compartida entre ${partes}: tu parte es ${money(valor / partes)}. El banco te cobra los ${money(valor)} completos y los otros ${money(valor - valor / partes)} te los devuelven: queda como ingreso esperado "Reembolso" (puedes mover su fecha en Ingresos).` : '');
   };
   fCuota.addEventListener('input', () => { cuotaManual = true; refrescar(); });
-  [fFecha, fMonto, fCuotas, fTasa].forEach((el) => el.addEventListener('input', refrescar));
+  [fFecha, fMonto, fCuotas, fTasa, fPartes].forEach((el) => el.addEventListener('input', refrescar));
   refrescar();
   const campos = [
     field('Fecha de la compra', fFecha), field('Valor de la compra', fMonto), field('Concepto', fConcepto, 'full'),
   ];
   if (nueva) campos.push(field('Número de cuotas (1 = una sola cuota)', fCuotas), field('Tasa M.V. % (si hay cuotas)', fTasa), field('Cuota mensual (puedes ajustarla)', fCuota, 'full'));
-  campos.push(field('Categoría', fCat, 'full'), info);
+  campos.push(field('Categoría', fCat, 'full'), field('¿Entre cuántas personas se divide? (contándote; 1 = solo tuya)', fPartes, 'full'), info);
   modal(nueva ? 'Agregar compra con tarjeta' : 'Editar compra', campos, {
     onSave: () => {
       if (!fConcepto.value.trim()) return 'Escribe el concepto.';
       if (!fMonto.getValue()) return 'Escribe el valor.';
       if (!fFecha.value && nueva) return 'Elige la fecha.';
       const n = Math.max(1, Number(fCuotas.value) || 1);
+      const partes = Math.max(1, Math.round(Number(fPartes.value) || 1));
+      if (n > 1 && partes > 1) return 'Dividir entre personas solo sirve en compras de una sola cuota.';
       if (n > 1) {
         const cuota = fCuota.getValue();
         if (!cuota) return 'Falta la cuota mensual.';
@@ -63,7 +68,7 @@ function modalCompra(t, existente) {
           tasaMV: Number(fTasa.value) || 0, valor: fMonto.getValue(), categoria: fCat.value,
         });
       } else {
-        const comp = { ...c, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), categoria: fCat.value };
+        const comp = { ...c, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), categoria: fCat.value, partes: partes > 1 ? partes : undefined };
         if (fFecha.value) { comp.fecha = fFecha.value; delete comp.corte; }
         saveCompraTarjeta(t.id, comp);
       }
@@ -151,7 +156,8 @@ export function renderCreditos(root) {
     const lista = (vacio, filas) => (filas.length ? h('div', {}, filas) : h('div', { class: 'muted' }, vacio));
     const filaCompra = (c) => h('div', { class: 'list-item' },
       h('div', {}, h('div', { class: 'name' }, c.concepto),
-        h('div', { class: 'meta' }, c.fecha ? fechaCorta(c.fecha) : 'sin fecha', '·', categoria(c.categoria)?.nombre || c.categoria)),
+        h('div', { class: 'meta' }, c.fecha ? fechaCorta(c.fecha) : 'sin fecha', '·', categoria(c.categoria)?.nombre || c.categoria,
+          c.partes > 1 ? ` · compartida entre ${c.partes}: tu parte ${money(c.monto / c.partes)}` : null)),
       h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } }, h('span', { class: 'amt num' }, money(c.monto)),
         h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + c.concepto, onclick: () => modalCompra(t, c) }, '✎')));
     const filaCuota = (x) => h('div', { class: 'list-item' },

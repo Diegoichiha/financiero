@@ -70,6 +70,7 @@ export function renderGuia(root) {
       h('li', {}, 'Los números de cuenta de "Cuentas para pagar" se copian con un clic.'),
       h('li', {}, 'Todo se guarda solo. Cada 30 minutos la app hace una copia en la carpeta data/backups.'),
       h('li', {}, 'En Ajustes puedes exportar una copia de tus datos cuando quieras.'),
+      h('li', {}, 'Si compras con la tarjeta algo que pagan entre varias personas, en Créditos → "Agregar compra" indica entre cuántas se divide: la app deja tu parte y crea sola el reembolso que esperas.'),
       h('li', {}, 'Lo que ya pagaste en hormiga no se resta del plan: ya está reflejado en el saldo que actualizaste.')));
 
   const cCuenta = h('section', { class: 'card w3' },
