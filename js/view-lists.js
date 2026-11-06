@@ -3,7 +3,7 @@ import {
   h, money, num, uid, todayISO, nowHHMM, monthEnd, addMonths, dayShort, monthName, pad, download, pct,
 } from './util.js';
 import {
-  state, TIPOS, TIPO, hooks, curMes, curRange, visibleMovs, visibleIngresos, sum, categoria, centroNombre, cuentaById, ordenPago, marcaPago, pagosSinCuenta,
+  state, TIPOS, TIPO, hooks, curMes, curRange, visibleMovs, visibleIngresos, sum, categoria, centroNombre, cuentaById, ordenPago, marcaPago,
   instancia, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
   addMov, updateMov, delMov, addIngreso, updateIngreso, delIngreso, saveFuente, delFuente, save,
   planGasto, setEsperado, addEsperado, delEsperado, setCobros, cuentaSugerida, recordarCuenta,
@@ -11,7 +11,7 @@ import {
 import { modal, confirmar, field, moneyInput, select, toast, copiar } from './ui.js';
 import { medidor } from './charts.js';
 import { extractoPagadoEn } from './creditos.js';
-import { selectorCuenta, esMedioSinCuenta, pagarMov, desmarcarPago, nombreCuenta, avisoCuenta, barraCuentas, modalPagosSinCuenta } from './cuentas-enlace.js';
+import { selectorCuenta, esMedioSinCuenta, pagarMov, desmarcarPago, nombreCuenta, avisoCuenta, barraCuentas } from './cuentas-enlace.js';
 
 const centroOpts = () => state.data.centros.map((c) => ({ value: c.id, label: c.nombre }));
 const catOpts = (tipo) => state.data.categorias.filter((c) => !tipo || c.tipo === tipo).map((c) => ({ value: c.id, label: c.nombre }));
@@ -280,10 +280,10 @@ export function renderMovimientos(root) {
     const r = form.read();
     if (typeof r === 'string') { toast(r); return; }
     ultimoTipo = r.tipo;
-    addMov(r);
-    recordarCuenta('gasto', r.concepto, r.cuentaId);
+    const mov = addMov(r);
+    recordarCuenta('gasto', r.concepto, mov.cuentaId);
     enfocarConcepto = true;
-    toast(avisoCuenta('gasto', r.monto, r.cuentaId) || (state.data.cuentasDinero.length && !esMedioSinCuenta(r.medio) ? `Agregado: ${r.concepto} · OJO: no se descontó de ninguna cuenta` : 'Agregado: ' + r.concepto));
+    toast(avisoCuenta('gasto', r.monto, mov.cuentaId) || 'Agregado: ' + r.concepto);
     hooks.rerender();
   };
   const formCard = h('section', { class: 'card' },
@@ -316,7 +316,6 @@ export function renderMovimientos(root) {
     // Primero lo ya pagado, en el orden en que se pagó (lo último arriba, con la hora para desempatar); lo pendiente va aparte, abajo.
     const pagados = lista.filter((m) => m.estado !== 'pendiente').sort(ordenPago);
     const pendientes = lista.filter((m) => m.estado === 'pendiente').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.concepto.localeCompare(b.concepto));
-    const sinCuentaIds = new Set(pagosSinCuenta().map((m) => m.id));
     const barra = barraCuentas({ activa: filtros.cuenta, alElegir: (id) => { filtros.cuenta = id; pintar(); } });
     cuentasHost.replaceChildren(...(barra ? [barra] : []));
     chipsHost.replaceChildren(
@@ -330,11 +329,7 @@ export function renderMovimientos(root) {
       h('td', {}, tipoDot(m.tipo)),
       h('td', {}, centroNombre(m.centro)),
       h('td', {}, m.medio || '—',
-        m.estado === 'pagado' && m.cuentaId && nombreCuenta(m.cuentaId)
-          ? h('div', {}, h('button', { class: 'chip cuenta', title: 'Cambiar la cuenta de la que salió', onclick: () => modalPagosSinCuenta([m]) }, '↳ ' + nombreCuenta(m.cuentaId)))
-          : null,
-        sinCuentaIds.has(m.id) ? h('div', {}, h('button', { class: 'chip alerta', title: 'Elegir de qué cuenta salió y descontarlo', onclick: () => modalPagosSinCuenta([m]) }, 'Sin cuenta · descontar')) : null,
-        m.estado === 'pagado' && m.yaEnSaldo && !m.cuentaId ? h('div', {}, h('button', { class: 'chip cuenta', title: 'Elegir una cuenta para descontarlo', onclick: () => modalPagosSinCuenta([m]) }, '↳ ya estaba en mi saldo')) : null),
+        m.estado === 'pagado' && m.cuentaId && nombreCuenta(m.cuentaId) ? h('div', { class: 'card-sub' }, '↳ ' + nombreCuenta(m.cuentaId)) : null),
       h('td', { class: 'r' }, money(m.monto)),
       h('td', {}, m.estado === 'pendiente'
         ? h('button', { class: 'chip', title: 'Marcar como pagado', onclick: () => pagarMov(m) }, 'Pendiente · pagar')

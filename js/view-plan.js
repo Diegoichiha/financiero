@@ -9,7 +9,7 @@ import {
 import { modal, field, moneyInput, select, toast } from './ui.js';
 import { card, lineaSaldo } from './charts.js';
 import { movForm, ingresoForm } from './view-lists.js';
-import { pagarMov, avisoCuenta } from './cuentas-enlace.js';
+import { pagarMov, avisoCuenta, movimientoHoy } from './cuentas-enlace.js';
 import { addIngreso, addMov, recordarCuenta } from './store.js';
 import { TIPOS_COMPROMISO } from './view-compromisos.js';
 
@@ -108,9 +108,9 @@ function modalGastoRapido() {
     onSave: () => {
       const r = f.read();
       if (typeof r === 'string') return r;
-      addMov(r);
-      recordarCuenta('gasto', r.concepto, r.cuentaId);
-      toast(avisoCuenta('gasto', r.monto, r.cuentaId) || 'Gasto registrado');
+      const mov = addMov(r);
+      recordarCuenta('gasto', r.concepto, mov.cuentaId);
+      toast(avisoCuenta('gasto', r.monto, mov.cuentaId) || 'Gasto registrado');
       hooks.rerender();
     },
   });
@@ -135,7 +135,7 @@ export function renderPlan(root) {
     const inp = moneyInput(c.saldo, { 'aria-label': 'Saldo de ' + c.nombre, class: 'mny' });
     inp.addEventListener('change', () => { saveCuentaDinero({ ...c, saldo: inp.getValue(), fecha: todayISO() }); hooks.rerender(); });
     return h('div', { class: 'list-item' },
-      h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, 'Saldo al ' + dayShort(c.fecha))),
+      h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, 'Saldo al ' + dayShort(c.fecha) + (movimientoHoy(c.id) ? ' · ' + movimientoHoy(c.id) : ''))),
       h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } }, inp,
         h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + c.nombre, onclick: () => modalCuenta(c) }, '✎')));
   };

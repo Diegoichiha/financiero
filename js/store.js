@@ -612,6 +612,8 @@ export function addMov(m) {
   const mov = { id: uid(), estado: 'pagado', medio: '', nota: '', ...m };
   // Un pago hecho hoy lleva la hora en que se registró (si no se indicó otra); uno de otro día queda sin hora.
   if (mov.estado === 'pagado' && mov.hora == null) mov.hora = mov.fecha === todayISO() ? nowHHMM() : '';
+  // Un gasto pagado SIEMPRE se descuenta de una cuenta (salvo efectivo o tarjeta de crédito): si no se eligió, la sugerida.
+  if (mov.estado === 'pagado' && !mov.cuentaId && !mov.yaEnSaldo && state.data.cuentasDinero.length && !esMedioSinCuenta(mov.medio)) mov.cuentaId = cuentaSugerida('gasto', mov.concepto) || undefined;
   state.data.movimientos.push(mov);
   moverSaldo(efectoMov(mov), +1);
   save();
@@ -741,6 +743,19 @@ export function sincronizarAutomaticos() {
       D.planIngresos.push(fila);
       cambio = true;
     }
+  }
+  // Pagos hechos (desde `conciliarDesde`) que quedaron sin cuenta: se descuentan solos de la cuenta sugerida. Nada que pulsar.
+  const sinCuenta = pagosSinCuenta();
+  if (sinCuenta.length) {
+    const por = {};
+    for (const m of sinCuenta) {
+      m.cuentaId = cuentaSugerida('gasto', m.concepto);
+      if (!m.cuentaId) continue;
+      moverSaldo(efectoMov(m), +1);
+      por[m.cuentaId] = (por[m.cuentaId] || 0) + m.monto;
+    }
+    state.avisoAuto = { n: sinCuenta.length, por };
+    cambio = true;
   }
   for (const m of D.movimientos) {
     if (!m.plantillaId || m.estado !== 'pendiente' || m.montoManual) continue;

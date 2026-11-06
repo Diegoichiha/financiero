@@ -2,7 +2,7 @@
 // Un ingreso con cuenta SUMA a esa cuenta; un pago con cuenta RESTA. Se deshace solo al editar, borrar o volver a pendiente.
 import { h, money, dayShort, todayISO } from './util.js';
 import {
-  state, hooks, marcarPagado, cuentaSugerida, recordarCuenta, cuentaDinero, esMedioSinCuenta, pagosSinCuenta, asignarCuentas, sum,
+  state, hooks, marcarPagado, cuentaSugerida, recordarCuenta, cuentaDinero, esMedioSinCuenta, sum,
 } from './store.js';
 import { modal, select, field, toast } from './ui.js';
 
@@ -54,62 +54,18 @@ export function desmarcarPago(m, alTerminar) {
   (alTerminar || (() => hooks.rerender()))();
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Pagos que se hicieron sin elegir de qué cuenta salieron: el plan no los descontó. Aquí se eligen y se descuentan de una vez.
-export function modalPagosSinCuenta(soloEstos) {
-  const lista = soloEstos || pagosSinCuenta();
-  if (!lista.length) { toast('No hay pagos sin cuenta.'); return; }
-  // Cada pago empieza en la cuenta que ya tiene; si no tiene, en la sugerida (o en "Ninguna" si dijiste que ya estaba en tu saldo).
-  const inicial = (m) => (m.cuentaId && cuentaDinero(m.cuentaId) ? m.cuentaId : (m.yaEnSaldo ? '' : cuentaSugerida('gasto', m.concepto)));
-  const filas = lista.map((m) => ({ m, sel: selectorCuenta(inicial(m), 'gasto', 'Ninguna: ya estaba descontado de mi saldo') }));
-  const efecto = h('div', { class: 'card-sub full', 'aria-live': 'polite' });
-  const pintar = () => {
-    // Lo que cambia en cada cuenta: se devuelve lo que ya tenía descontado y se descuenta de la nueva.
-    const delta = new Map();
-    for (const { m, sel } of filas) {
-      if (m.cuentaId && m.estado === 'pagado') delta.set(m.cuentaId, (delta.get(m.cuentaId) || 0) + m.monto);
-      if (sel.value) delta.set(sel.value, (delta.get(sel.value) || 0) - m.monto);
-    }
-    const lineas = [...delta].filter(([id, d]) => d && cuentaDinero(id)).map(([id, d]) => h('div', {}, `${nombreCuenta(id)}: hoy ${money(cuentaDinero(id).saldo)} → quedará ${money(cuentaDinero(id).saldo + d)}`));
-    efecto.replaceChildren(...(lineas.length ? lineas : [h('div', {}, 'No cambia el saldo de ninguna cuenta.')]));
-  };
-  filas.forEach(({ sel }) => sel.addEventListener('change', pintar));
-  pintar();
-  modal(lista.length === 1 ? `¿De qué cuenta salió «${lista[0].concepto}»?` : 'Pagos que no se han descontado de ninguna cuenta', [
-    h('div', { class: 'card-sub full' }, 'Elige la cuenta de donde salió cada pago y se descuenta de "Tengo hoy": así el plan queda al día. Si ya lo habías restado de tu saldo, elige "Ninguna".'),
-    ...filas.map(({ m, sel }) => field(`${m.concepto} · ${money(m.monto)} · ${dayShort(m.fecha)}${m.hora ? ' ' + m.hora : ''}`, sel, 'full')),
-    efecto,
-  ], {
-    guardar: 'Guardar',
-    onSave: () => {
-      for (const { m, sel } of filas) recordarCuenta('gasto', m.concepto, sel.value);
-      const mensajes = filas.filter(({ sel }) => sel.value).map(({ m, sel }) => ({ id: m.id, cuentaId: sel.value, monto: m.monto }));
-      asignarCuentas(filas.map(({ m, sel }) => ({ id: m.id, cuentaId: sel.value })));
-      const total = sum(mensajes, (x) => x.monto);
-      const uno = filas.length === 1 && mensajes.length === 1 ? cuentaDinero(mensajes[0].cuentaId) : null;
-      toast(uno ? `${money(total)} salen de ${uno.nombre} · ahora tiene ${money(uno.saldo)}` : mensajes.length ? `Se descontaron ${money(total)} de tus cuentas` : 'Listo: quedaron como ya descontados');
-      hooks.rerender();
-    },
-  });
-}
-
-// Aviso que se ve en todas las pestañas mientras haya pagos sin cuenta.
-export function avisoSinCuenta() {
-  const lista = pagosSinCuenta();
-  if (!lista.length) return null;
-  const nombres = lista.slice(0, 3).map((m) => m.concepto).join(', ') + (lista.length > 3 ? '…' : '');
-  return h('div', { class: 'banner' },
-    h('span', {}, h('b', {}, lista.length === 1 ? '1 pago sin cuenta' : `${lista.length} pagos sin cuenta`), ` (${nombres}) por ${money(sum(lista, (m) => m.monto))}: el plan todavía no los descontó de ninguna cuenta.`),
-    h('button', { class: 'btn sm primary', onclick: () => modalPagosSinCuenta() }, 'Descontar de mi cuenta'));
+// Lo que entró y salió hoy de una cuenta, para ver al instante cómo se movió su saldo.
+export function movimientoHoy(cuentaId) {
+  const hoy = todayISO();
+  const sale = sum(state.data.movimientos.filter((m) => m.estado === 'pagado' && m.fecha === hoy && m.cuentaId === cuentaId));
+  const entra = sum(state.data.ingresos.filter((i) => i.fecha === hoy && i.cuentaId === cuentaId));
+  return [entra > 0 ? `+ ${money(entra)} hoy` : null, sale > 0 ? `− ${money(sale)} hoy` : null].filter(Boolean).join(' · ');
 }
 
 // Cuánta plata hay en cada cuenta, con lo que ya salió hoy. Si se pasa `alElegir`, cada cuenta sirve de filtro.
 export function barraCuentas({ activa = '', alElegir } = {}) {
   const cuentas = state.data.cuentasDinero;
   if (!cuentas.length) return null;
-  const hoy = todayISO();
-  const saleHoy = (id) => sum(state.data.movimientos.filter((m) => m.estado === 'pagado' && m.fecha === hoy && m.cuentaId === id));
-  const entraHoy = (id) => sum(state.data.ingresos.filter((i) => i.fecha === hoy && i.cuentaId === id));
   const tile = (id, nombre, saldo, sub, extra = '') => {
     const hijos = [h('span', { class: 'nm' }, nombre), h('span', { class: 'sd num' + (saldo < 0 ? ' neg' : '') }, money(saldo)), sub ? h('span', { class: 'sb' }, sub) : null];
     return alElegir && id !== 'total'
@@ -118,9 +74,5 @@ export function barraCuentas({ activa = '', alElegir } = {}) {
   };
   return h('div', { class: 'cuentas-bar', role: 'group', 'aria-label': 'Saldo de cada cuenta' },
     tile('total', 'Tengo hoy', sum(cuentas, (c) => c.saldo), `${cuentas.length} cuenta${cuentas.length === 1 ? '' : 's'}`, ' total'),
-    ...cuentas.map((c) => {
-      const sale = saleHoy(c.id), entra = entraHoy(c.id);
-      const partes = [entra > 0 ? `+ ${money(entra)} hoy` : null, sale > 0 ? `− ${money(sale)} hoy` : null].filter(Boolean);
-      return tile(c.id, c.nombre, c.saldo, partes.length ? partes.join(' · ') : 'Saldo al ' + dayShort(c.fecha));
-    }));
+    ...cuentas.map((c) => tile(c.id, c.nombre, c.saldo, movimientoHoy(c.id) || 'Saldo al ' + dayShort(c.fecha))));
 }

@@ -1,10 +1,10 @@
 // Arranque: comprueba la sesión (usuario y contraseña), carga los datos, arma la estructura (pestañas + filtros) y pinta la pantalla activa.
-import { h, todayISO, monthName, rangeLabel, isoWeek } from './util.js';
+import { h, todayISO, monthName, rangeLabel, isoWeek, money } from './util.js';
 import {
   state, load, hooks, flush, curPeriod, rangeOf, shiftPeriod, hayDemo, quitarDemo, save, sincronizarAutomaticos,
 } from './store.js';
 import { disposeCharts } from './charts.js';
-import { hideTip } from './ui.js';
+import { hideTip, toast } from './ui.js';
 import { renderResumen } from './view-resumen.js';
 import { renderRecurrentes, renderMovimientos, renderIngresos } from './view-lists.js';
 import { renderCuentas, renderAjustes } from './view-config.js';
@@ -16,7 +16,6 @@ import { renderGuia } from './view-guia.js';
 import { pantallaLogin, pantallaClave, post } from './login.js';
 import { switchTema, esOscuro } from './tema.js';
 import { botonMarca } from './marca.js';
-import { avisoSinCuenta } from './cuentas-enlace.js';
 
 const TABS = [
   { id: 'resumen', n: 'Resumen', ico: 'resumen', eyebrow: 'Panorama', filtros: true, render: renderResumen },
@@ -181,8 +180,6 @@ function renderFilters() {
 
 function renderBanner() {
   refs.banner.replaceChildren();
-  const sinCuenta = state.data && avisoSinCuenta();
-  if (sinCuenta) refs.banner.append(sinCuenta);
   if (hayDemo()) {
     refs.banner.append(h('div', { class: 'banner' },
       h('span', {}, 'Estás viendo ', h('b', {}, 'datos de ejemplo'), '. No son tus gastos reales.'),
@@ -192,6 +189,12 @@ function renderBanner() {
 
 function render() {
   if (sincronizarAutomaticos()) save();
+  if (state.avisoAuto) {
+    const { n, por } = state.avisoAuto;
+    state.avisoAuto = null;
+    const partes = Object.entries(por).map(([id, v]) => `${money(v)} de ${state.data.cuentasDinero.find((x) => x.id === id)?.nombre || 'tu cuenta'}`);
+    toast(`Se descontaron solos ${partes.join(' y ')} (${n} pago${n === 1 ? '' : 's'} que estaba${n === 1 ? '' : 'n'} sin cuenta)`);
+  }
   disposeCharts();
   hideTip();
   savePrefs();
