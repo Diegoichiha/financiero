@@ -16,6 +16,7 @@ import { renderGuia } from './view-guia.js';
 import { pantallaLogin, pantallaClave, post } from './login.js';
 import { switchTema, esOscuro } from './tema.js';
 import { botonMarca } from './marca.js';
+import { avisoSinCuenta } from './cuentas-enlace.js';
 
 const TABS = [
   { id: 'resumen', n: 'Resumen', ico: 'resumen', eyebrow: 'Panorama', filtros: true, render: renderResumen },
@@ -180,6 +181,8 @@ function renderFilters() {
 
 function renderBanner() {
   refs.banner.replaceChildren();
+  const sinCuenta = state.data && avisoSinCuenta();
+  if (sinCuenta) refs.banner.append(sinCuenta);
   if (hayDemo()) {
     refs.banner.append(h('div', { class: 'banner' },
       h('span', {}, 'Estás viendo ', h('b', {}, 'datos de ejemplo'), '. No son tus gastos reales.'),

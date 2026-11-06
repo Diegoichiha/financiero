@@ -545,3 +545,21 @@ button.brand { display: flex; align-items: center; gap: 10px; min-width: 0; padd
   .app.colapsado .tab .tab-n { display: block; }
   .side-top { display: none; }
 }
+
+/* ---------- Saldo de cada cuenta, hora en los pagos y pagos sin cuenta ---------- */
+.cuentas-bar { display: flex; flex-wrap: wrap; gap: 10px; }
+.cta {
+  flex: 1 1 180px; min-width: 0; display: grid; gap: 2px; text-align: left; padding: 12px 16px; border-radius: 18px;
+  border: 1px solid var(--ring); background: var(--surface); color: var(--ink); font: inherit; box-shadow: var(--shadow-sm, none);
+}
+button.cta { cursor: pointer; transition: background-color 0.25s, border-color 0.25s, box-shadow 0.25s; }
+button.cta:hover { background: var(--wash); }
+button.cta[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: var(--wash); }
+.cta.total { background: var(--res-bg); color: var(--res-ink); border-color: transparent; }
+.cta .nm { font-size: 12px; font-weight: 650; color: var(--ink-2); }
+.cta .sd { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.cta .sd.neg { color: var(--crit-ink); }
+.cta .sb { font-size: 12px; color: var(--muted); }
+.cta.total .nm, .cta.total .sb { color: var(--res-ink); opacity: 0.82; }
+button.chip.alerta { margin-top: 4px; border-color: color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--ink); }
+button.chip.alerta:hover { background: color-mix(in srgb, var(--warn) 26%, var(--surface)); }

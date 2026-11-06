@@ -7,7 +7,7 @@ const PASOS = [
   { t: 'Pon lo que tienes hoy', d: 'La primera vez, escribe en "Tengo hoy" (Plan del mes) el saldo de cada cuenta. Después se mueve solo con tus ingresos y pagos; si no coincide con el banco, corrígelo ahí.', ir: 'plan', b: 'Ir al Plan del mes' },
   { t: 'Anota lo que recibes', d: 'En Ingresos pulsa "+ Recibí" cuando te paguen. Lo que todavía no llega queda como "Espero recibir", con su fecha. Eliges en qué cuenta entró y se suma sola a "Tengo hoy".', ir: 'ingresos', b: 'Ir a Ingresos' },
   { t: 'Marca lo que pagas', d: 'En Recurrentes elige los pagos del mes y pulsa "Marcar pagado" al pagar cada uno. Lo que sigue pendiente es "Falta por pagar". Eliges de qué cuenta pagaste y se descuenta sola de "Tengo hoy".', ir: 'recurrentes', b: 'Ir a Recurrentes' },
-  { t: 'Registra lo que gastas', d: 'En Gastos anota el mercado, domicilios, salidas… Lo que ya compraste en mercado se descuenta del presupuesto de mercado. Eliges la cuenta de la que salió (o ninguna, si fue en efectivo o con tarjeta).', ir: 'movimientos', b: 'Ir a Gastos' },
+  { t: 'Registra lo que gastas', d: 'En Gastos anota el mercado, domicilios, salidas… Lo que ya compraste en mercado se descuenta del presupuesto de mercado. Eliges la cuenta de la que salió (o ninguna, si fue en efectivo o con tarjeta). Cada gasto guarda su hora y la lista va en el orden en que pagaste (lo último arriba); lo pendiente queda aparte, abajo.', ir: 'movimientos', b: 'Ir a Gastos' },
   { t: 'Presupuesta tus compromisos', d: 'En el Plan del mes, escribe cuánto quieres gastar en cada compromiso (paseos, cumpleaños…). El plan te dice el máximo posible y cuánto te queda para gustos.', ir: 'plan', b: 'Ir a los compromisos' },
 ];
 
@@ -71,7 +71,8 @@ export function renderGuia(root) {
       h('li', {}, 'Todo se guarda solo. Cada 30 minutos la app hace una copia en la carpeta data/backups.'),
       h('li', {}, 'En Ajustes puedes exportar una copia de tus datos cuando quieras.'),
       h('li', {}, 'Si compras con la tarjeta algo que pagan entre varias personas, en Créditos → "Agregar compra" indica entre cuántas se divide: la app deja tu parte y crea sola el reembolso que esperas.'),
-      h('li', {}, 'Lo que ya pagaste en hormiga no se resta del plan: ya está reflejado en el saldo que actualizaste.')));
+      h('li', {}, 'Lo que pagas con una cuenta baja el saldo de esa cuenta y, con él, lo que puedes gastar. Si hoy ya pagaste el domicilio o el parqueadero de tu rutina, esa vez de hoy deja de esperarse: no se cuenta dos veces.'),
+      h('li', {}, 'Si arriba aparece el aviso "pagos sin cuenta", pulsa "Descontar de mi cuenta" y elige de cuál salió cada uno: así el plan queda al día.')));
 
   const cCuenta = h('section', { class: 'card w3' },
     h('div', { class: 'card-title' }, 'Tu cuenta y seguridad'),

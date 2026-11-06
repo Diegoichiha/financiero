@@ -1,9 +1,9 @@
 // Pantallas de captura: Recurrentes (elegir y pagar), Movimientos (variables y hormiga) e Ingresos.
 import {
-  h, money, num, uid, todayISO, monthEnd, addMonths, dayShort, monthName, pad, download, pct,
+  h, money, num, uid, todayISO, nowHHMM, monthEnd, addMonths, dayShort, monthName, pad, download, pct,
 } from './util.js';
 import {
-  state, TIPOS, TIPO, hooks, curMes, curRange, visibleMovs, visibleIngresos, sum, categoria, centroNombre, cuentaById,
+  state, TIPOS, TIPO, hooks, curMes, curRange, visibleMovs, visibleIngresos, sum, categoria, centroNombre, cuentaById, ordenPago, marcaPago, pagosSinCuenta,
   instancia, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
   addMov, updateMov, delMov, addIngreso, updateIngreso, delIngreso, saveFuente, delFuente, save,
   planGasto, setEsperado, addEsperado, delEsperado, setCobros, cuentaSugerida, recordarCuenta,
@@ -11,7 +11,7 @@ import {
 import { modal, confirmar, field, moneyInput, select, toast, copiar } from './ui.js';
 import { medidor } from './charts.js';
 import { extractoPagadoEn } from './creditos.js';
-import { selectorCuenta, esMedioSinCuenta, pagarMov, desmarcarPago, nombreCuenta, avisoCuenta } from './cuentas-enlace.js';
+import { selectorCuenta, esMedioSinCuenta, pagarMov, desmarcarPago, nombreCuenta, avisoCuenta, barraCuentas, modalPagosSinCuenta } from './cuentas-enlace.js';
 
 const centroOpts = () => state.data.centros.map((c) => ({ value: c.id, label: c.nombre }));
 const catOpts = (tipo) => state.data.categorias.filter((c) => !tipo || c.tipo === tipo).map((c) => ({ value: c.id, label: c.nombre }));
@@ -172,6 +172,11 @@ let enfocarConcepto = false;
 export function movForm(ini) {
   let tipo = ini.tipo || ultimoTipo;
   const fFecha = h('input', { type: 'date', value: ini.fecha || defaultDate() });
+  // Hora del pago: sirve para ordenar lo que pasó el mismo día. Si no la tocas, se guarda la hora exacta en que registras.
+  const fHora = h('input', { type: 'time', value: ini.id ? (ini.hora || '') : (fFecha.value === todayISO() ? nowHHMM() : '') });
+  let horaTocada = false;
+  fHora.addEventListener('input', () => { horaTocada = true; });
+  fFecha.addEventListener('change', () => { if (!ini.id && !horaTocada) fHora.value = fFecha.value === todayISO() ? nowHHMM() : ''; });
   const fConcepto = h('input', { type: 'text', value: ini.concepto || '', placeholder: 'Ej. Mercado Cañaveral', list: 'dl-conceptos', autocomplete: 'off' });
   const fMonto = moneyInput(ini.monto);
   let fCat = select(catOpts(tipo), ini.categoria || catOpts(tipo)[0]?.value);
@@ -213,6 +218,7 @@ export function movForm(ini) {
   const nodes = [
     h('datalist', { id: 'dl-conceptos' }, lista.map((c) => h('option', { value: c }))),
     field('Fecha', fFecha),
+    field('Hora', fHora),
     field('Concepto', fConcepto, 'wide full'),
     field('Monto', fMonto),
     h('div', { class: 'f wide' }, h('span', { style: { fontSize: '12px', color: 'var(--ink-2)' } }, 'Tipo'), seg),
@@ -228,25 +234,36 @@ export function movForm(ini) {
     if (!fConcepto.value.trim()) return 'Escribe el concepto.';
     if (!fMonto.getValue()) return 'Escribe el monto.';
     if (!fFecha.value) return 'Elige la fecha.';
+    const estado = ini.id ? fEstado.value : 'pagado';
+    // Nuevo y sin tocar la hora: la de este momento (si es de hoy). Al pasar un pendiente a pagado también se pone la de ahora.
+    let hora = fHora.value;
+    if (estado === 'pendiente') hora = '';
+    else if (!hora && fFecha.value === todayISO() && (!ini.id || ini.estado === 'pendiente')) hora = nowHHMM();
+    else if (!ini.id && !horaTocada) hora = fFecha.value === todayISO() ? nowHHMM() : '';
     return {
-      fecha: fFecha.value, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo, categoria: fCat.value,
-      centro: fCentro.value, medio: fMedio.value, nota: fNota.value.trim(), compromisoId: fComp.value || undefined, cuentaId: fCuenta.value || undefined, ...(ini.id ? { estado: fEstado.value } : {}),
+      fecha: fFecha.value, hora, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo, categoria: fCat.value,
+      centro: fCentro.value, medio: fMedio.value, nota: fNota.value.trim(), compromisoId: fComp.value || undefined, cuentaId: fCuenta.value || undefined,
+      // Elegir "Ninguna" a propósito (efectivo, tarjeta o "ya estaba en mi saldo") es una decisión: no se vuelve a avisar.
+      sinCuenta: state.data.cuentasDinero.length && !fCuenta.value ? true : undefined,
+      ...(ini.id ? { estado } : {}),
     };
   };
   const reset = () => { fConcepto.value = ''; fMonto.value = ''; fNota.value = ''; };
   return { nodes, read, reset, focus: () => fConcepto.focus() };
 }
 
-const filtrosMov = { q: '', tipo: 'todos', soloPend: false };
+const filtrosMov = { q: '', tipo: 'todos', soloPend: false, cuenta: '' };
 
 export function renderMovimientos(root) {
   const filtros = filtrosMov;
+  if (filtros.cuenta && !state.data.cuentasDinero.some((c) => c.id === filtros.cuenta)) filtros.cuenta = '';
   const form = movForm({});
   const range = curRange();
-  const todos = visibleMovs(range).sort((a, b) => b.fecha.localeCompare(a.fecha) || a.concepto.localeCompare(b.concepto));
+  const todos = visibleMovs(range);
   const filtrar = () => {
     const q = filtros.q.toLowerCase();
     return todos.filter((m) => (filtros.tipo === 'todos' || m.tipo === filtros.tipo) && (!filtros.soloPend || m.estado === 'pendiente')
+      && (!filtros.cuenta || m.cuentaId === filtros.cuenta)
       && (!q || `${m.concepto} ${categoria(m.categoria)?.nombre || ''} ${m.nota}`.toLowerCase().includes(q)));
   };
 
@@ -275,29 +292,44 @@ export function renderMovimientos(root) {
   };
 
   // Solo se vuelven a pintar los chips y la tabla (el formulario conserva lo que estés escribiendo).
+  const cuentasHost = h('div', {});
   const chipsHost = h('div', { class: 'row', style: { gap: '6px' } });
   const tablaHost = h('div', {});
   const pintar = () => {
     const lista = filtrar();
+    // Primero lo ya pagado, en el orden en que se pagó (lo último arriba, con la hora para desempatar); lo pendiente va aparte, abajo.
+    const pagados = lista.filter((m) => m.estado !== 'pendiente').sort(ordenPago);
+    const pendientes = lista.filter((m) => m.estado === 'pendiente').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.concepto.localeCompare(b.concepto));
+    const sinCuentaIds = new Set(pagosSinCuenta().map((m) => m.id));
+    const barra = barraCuentas({ activa: filtros.cuenta, alElegir: (id) => { filtros.cuenta = id; pintar(); } });
+    cuentasHost.replaceChildren(...(barra ? [barra] : []));
     chipsHost.replaceChildren(
       ...[{ id: 'todos', n: 'Todos' }, ...TIPOS.map((t) => ({ id: t.id, n: t.nombre }))].map((t) =>
         h('button', { class: 'chip', 'aria-pressed': String(filtros.tipo === t.id), onclick: () => { filtros.tipo = t.id; pintar(); } }, t.n)),
       h('button', { class: 'chip', 'aria-pressed': String(filtros.soloPend), onclick: () => { filtros.soloPend = !filtros.soloPend; pintar(); } }, 'Solo pendientes'));
+    const fila = (m) => h('tr', {},
+      h('td', { class: 'num' }, dayShort(m.fecha), m.estado !== 'pendiente' && m.hora ? h('div', { class: 'card-sub num' }, m.hora) : null),
+      h('td', {}, m.concepto, m.compromisoId ? h('div', { class: 'card-sub' }, '↳ ' + (state.data.compromisos.find((c) => c.id === m.compromisoId)?.nombre || 'Compromiso')) : null, m.nota ? h('div', { class: 'card-sub' }, m.nota) : null),
+      h('td', {}, categoria(m.categoria)?.nombre || m.categoria),
+      h('td', {}, tipoDot(m.tipo)),
+      h('td', {}, centroNombre(m.centro)),
+      h('td', {}, m.medio || '—',
+        m.cuentaId && m.estado === 'pagado' && nombreCuenta(m.cuentaId) ? h('div', { class: 'card-sub' }, '↳ ' + nombreCuenta(m.cuentaId)) : null,
+        sinCuentaIds.has(m.id) ? h('div', {}, h('button', { class: 'chip alerta', title: 'Elegir de qué cuenta salió y descontarlo', onclick: () => modalPagosSinCuenta([m]) }, 'Sin cuenta · descontar')) : null),
+      h('td', { class: 'r' }, money(m.monto)),
+      h('td', {}, m.estado === 'pendiente'
+        ? h('button', { class: 'chip', title: 'Marcar como pagado', onclick: () => pagarMov(m) }, 'Pendiente · pagar')
+        : h('span', { class: 'muted' }, 'Pagado')),
+      h('td', {}, h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + m.concepto, onclick: () => editar(m) }, '✎')));
     tablaHost.replaceChildren(lista.length
       ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
         h('thead', {}, h('tr', {}, ['Fecha', 'Concepto', 'Categoría', 'Tipo', 'Centro', 'Medio'].map((t) => h('th', {}, t)), h('th', { class: 'r' }, 'Monto'), h('th', {}, 'Estado'), h('th'))),
-        h('tbody', {}, lista.map((m) => h('tr', {},
-          h('td', { class: 'num' }, dayShort(m.fecha)),
-          h('td', {}, m.concepto, m.compromisoId ? h('div', { class: 'card-sub' }, '↳ ' + (state.data.compromisos.find((c) => c.id === m.compromisoId)?.nombre || 'Compromiso')) : null, m.nota ? h('div', { class: 'card-sub' }, m.nota) : null),
-          h('td', {}, categoria(m.categoria)?.nombre || m.categoria),
-          h('td', {}, tipoDot(m.tipo)),
-          h('td', {}, centroNombre(m.centro)),
-          h('td', {}, m.medio || '—', m.cuentaId && m.estado === 'pagado' && nombreCuenta(m.cuentaId) ? h('div', { class: 'card-sub' }, '↳ ' + nombreCuenta(m.cuentaId)) : null),
-          h('td', { class: 'r' }, money(m.monto)),
-          h('td', {}, m.estado === 'pendiente'
-            ? h('button', { class: 'chip', title: 'Marcar como pagado', onclick: () => pagarMov(m) }, 'Pendiente · pagar')
-            : h('span', { class: 'muted' }, 'Pagado')),
-          h('td', {}, h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + m.concepto, onclick: () => editar(m) }, '✎'))))),
+        h('tbody', {},
+          ...pagados.map(fila),
+          pendientes.length ? h('tr', { class: 'periodo' }, h('td', { colspan: 9 },
+            h('b', {}, `Por pagar · ${pendientes.length} pendiente${pendientes.length === 1 ? '' : 's'}`),
+            h('div', { class: 'card-sub num' }, `${money(sum(pendientes))} · por fecha de vencimiento, aparte de lo ya pagado`))) : null,
+          ...pendientes.map(fila)),
         h('tfoot', {}, h('tr', {}, h('td', { colspan: 6 }, `${lista.length} movimiento${lista.length === 1 ? '' : 's'}`), h('td', { class: 'r' }, money(sum(lista))), h('td'), h('td')))))
       : h('div', { class: 'empty' }, h('div', {}, todos.length ? 'Ningún movimiento coincide con el filtro.' : 'Aún no hay movimientos en este periodo.')));
   };
@@ -306,7 +338,7 @@ export function renderMovimientos(root) {
   buscar.addEventListener('input', () => { filtros.q = buscar.value; pintar(); });
   pintar();
 
-  root.replaceChildren(h('div', { class: 'stack' }, formCard,
+  root.replaceChildren(h('div', { class: 'stack' }, cuentasHost, formCard,
     h('section', { class: 'card' },
       h('div', { class: 'row', style: { justifyContent: 'space-between' } }, buscar, chipsHost,
         h('button', { class: 'btn', onclick: () => exportarCSV(filtrar()) }, 'Exportar CSV')),
@@ -316,8 +348,8 @@ export function renderMovimientos(root) {
 
 function exportarCSV(lista) {
   const esc = (v) => '"' + String(v ?? '').replaceAll('"', '""') + '"';
-  const filas = [['fecha', 'concepto', 'categoria', 'tipo', 'centro', 'medio', 'monto', 'estado', 'nota']];
-  for (const m of lista) filas.push([m.fecha, m.concepto, categoria(m.categoria)?.nombre || m.categoria, m.tipo, centroNombre(m.centro), m.medio, m.monto, m.estado, m.nota]);
+  const filas = [['fecha', 'hora', 'concepto', 'categoria', 'tipo', 'centro', 'medio', 'cuenta', 'monto', 'estado', 'nota']];
+  for (const m of lista) filas.push([m.fecha, m.hora || '', m.concepto, categoria(m.categoria)?.nombre || m.categoria, m.tipo, centroNombre(m.centro), m.medio, nombreCuenta(m.cuentaId), m.monto, m.estado, m.nota]);
   download('movimientos.csv', '﻿' + filas.map((f) => f.map(esc).join(',')).join('\n'), 'text/csv');
 }
 
@@ -353,6 +385,10 @@ function editarFuente(f, tipoPorDefecto = 'recurrente') {
 
 export function ingresoForm(ini) {
   const fFecha = h('input', { type: 'date', value: ini.fecha || defaultDate() });
+  const fHora = h('input', { type: 'time', value: ini.id ? (ini.hora || '') : (fFecha.value === todayISO() ? nowHHMM() : '') });
+  let horaTocada = false;
+  fHora.addEventListener('input', () => { horaTocada = true; });
+  fFecha.addEventListener('change', () => { if (!ini.id && !horaTocada) fHora.value = fFecha.value === todayISO() ? nowHHMM() : ''; });
   const fFuente = h('input', { type: 'text', value: ini.fuente || '', placeholder: 'Ej. VEC', list: 'dl-fuentes', autocomplete: 'off' });
   const fMonto = moneyInput(ini.monto);
   const fCentro = select(centroOpts(), ini.centro || (state.centro === 'todos' ? 'hogar' : state.centro));
@@ -367,7 +403,7 @@ export function ingresoForm(ini) {
   });
   const nodes = [
     h('datalist', { id: 'dl-fuentes' }, state.data.fuentesIngreso.map((f) => h('option', { value: f.nombre }))),
-    field('Fecha', fFecha), field('Fuente', fFuente, 'wide full'), field('Monto', fMonto), field('Centro', fCentro),
+    field('Fecha', fFecha), field('Hora', fHora), field('Fuente', fFuente, 'wide full'), field('Monto', fMonto), field('Centro', fCentro),
     state.data.cuentasDinero.length ? field('¿En qué cuenta entró? (se suma a "Tengo hoy")', fCuenta, 'wide full') : null,
     field('Nota', fNota, 'wide full'),
   ];
@@ -375,7 +411,8 @@ export function ingresoForm(ini) {
     if (!fFuente.value.trim()) return 'Escribe la fuente.';
     if (!fMonto.getValue()) return 'Escribe el monto.';
     if (!fFecha.value) return 'Elige la fecha.';
-    return { fecha: fFecha.value, fuente: fFuente.value.trim(), monto: fMonto.getValue(), centro: fCentro.value, nota: fNota.value.trim(), cuentaId: fCuenta.value || undefined };
+    const hora = !ini.id && !horaTocada ? (fFecha.value === todayISO() ? nowHHMM() : '') : fHora.value;
+    return { fecha: fFecha.value, hora, fuente: fFuente.value.trim(), monto: fMonto.getValue(), centro: fCentro.value, nota: fNota.value.trim(), cuentaId: fCuenta.value || undefined };
   };
   return { nodes, read };
 }
@@ -462,7 +499,7 @@ export function renderIngresos(root) {
   const pg = planGasto(mes);
   const form = ingresoForm({});
   const range = { from: mes + '-01', to: monthEnd(mes + '-01') };
-  const pagos = visibleIngresos(range).sort((a, b) => b.fecha.localeCompare(a.fecha));
+  const pagos = visibleIngresos(range).sort((a, b) => marcaPago(b).localeCompare(marcaPago(a)) || state.data.ingresos.indexOf(b) - state.data.ingresos.indexOf(a));
 
   // ---- ¿Cuánto puedo gastar? ----
   const stat = (label, valor, sub) => h('div', { class: 'stat' }, h('div', { class: 'tile-label' }, label), h('div', { class: 'tile-value num' }, money(valor)), sub ? h('div', { class: 'card-sub' }, sub) : null);
@@ -545,7 +582,7 @@ export function renderIngresos(root) {
       ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
         h('thead', {}, h('tr', {}, ['Fecha', 'Fuente', 'Centro', 'Nota'].map((t) => h('th', {}, t)), h('th', { class: 'r' }, 'Monto'), h('th'))),
         h('tbody', {}, pagos.map((i) => h('tr', {},
-          h('td', { class: 'num' }, dayShort(i.fecha)), h('td', {}, i.fuente, i.cuentaId && nombreCuenta(i.cuentaId) ? h('div', { class: 'card-sub' }, '↳ entró a ' + nombreCuenta(i.cuentaId)) : null), h('td', {}, centroNombre(i.centro)), h('td', { class: 'muted' }, i.nota),
+          h('td', { class: 'num' }, dayShort(i.fecha), i.hora ? h('div', { class: 'card-sub num' }, i.hora) : null), h('td', {}, i.fuente, i.cuentaId && nombreCuenta(i.cuentaId) ? h('div', { class: 'card-sub' }, '↳ entró a ' + nombreCuenta(i.cuentaId)) : null), h('td', {}, centroNombre(i.centro)), h('td', { class: 'muted' }, i.nota),
           h('td', { class: 'r' }, money(i.monto)),
           h('td', {}, h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + i.fuente, onclick: () => editar(i) }, '✎'))))),
         h('tfoot', {}, h('tr', {}, h('td', { colspan: 4 }, 'Total recibido'), h('td', { class: 'r' }, money(sum(pagos))), h('td')))))

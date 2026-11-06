@@ -1,5 +1,5 @@
 // Pantalla Resumen: cifras clave + gráficas para ver "cómo vamos".
-import { pagarMov } from './cuentas-enlace.js';
+import { pagarMov, barraCuentas } from './cuentas-enlace.js';
 import {
   h, money, moneyCompact, pct, todayISO, daysBetween, addDays, addMonths, monthStart, monthEnd, weekStart,
   daysInMonth, parse, dowIndex, DIAS_C, MESES_C, monthName, dayShort, rangeLabel, isoWeek, iso,
@@ -278,7 +278,11 @@ export function renderResumen(root) {
       h('span', { class: 'amt num' }, money(m.monto)))) : h('div', { class: 'muted' }, 'Sin gastos en el periodo.'))),
     () => ({ cab: ['Concepto', 'Tipo', 'Fecha', 'Valor'], filas: mayores.map((m) => [m.concepto, TIPO[m.tipo].corto, dayShort(m.fecha), money(m.monto)]) })));
 
-  root.replaceChildren(h('div', { class: 'grid' }, hero, tGasto, tPagar, tProm, tHorm, cMin, cDona, cPagar, cPres, ...cards.filter(Boolean)));
+  const barra = barraCuentas();
+  const cCuentas = barra ? h('section', { class: 'card w6' },
+    h('div', { class: 'card-head' }, h('div', {}, h('div', { class: 'card-title' }, 'Mis cuentas'), h('div', { class: 'card-sub' }, 'Cuánta plata hay en cada una hoy. Se mueve sola con lo que recibes y pagas.'))), barra) : null;
+
+  root.replaceChildren(h('div', { class: 'grid' }, hero, cCuentas, tGasto, tPagar, tProm, tHorm, cMin, cDona, cPagar, cPres, ...cards.filter(Boolean)));
 }
 
 // Presupuesto de fijos (recurrentes + mercado), ingreso mínimo y cuánto guardar según lo que esperas recibir.

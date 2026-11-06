@@ -61,6 +61,7 @@ export const parse = (str) => {
   return new Date(y, m - 1, d);
 };
 export const todayISO = () => iso(new Date());
+export const nowHHMM = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 export const addDays = (str, n) => {
   const d = parse(str);
   d.setDate(d.getDate() + n);

@@ -1,6 +1,6 @@
 // Estado, persistencia (servidor local) y consultas sobre los datos.
 import {
-  uid, pad, parse, monthName, MESES_C, todayISO, monthStart, monthEnd, addDays, addMonths, weekStart, daysInMonth, mulberry32,
+  uid, pad, parse, monthName, MESES_C, todayISO, nowHHMM, monthStart, monthEnd, addDays, addMonths, weekStart, daysInMonth, mulberry32,
 } from './util.js';
 import { extractoPagadoEn, corteDeFecha, pagoDeCorte } from './creditos.js';
 
@@ -228,6 +228,13 @@ function migrate(d) {
     // Fuentes de ingreso: recurrentes (VEC, TAP, Mamá) o variables (el resto); se puede cambiar en Ingresos.
     for (const fu of d.fuentesIngreso) if (!fu.tipo) fu.tipo = /vec|tap|mam[aá]/i.test(fu.nombre) ? 'recurrente' : 'variable';
     d.config.migraciones.push('auto-ingresos-2026-11');
+    cambio = true;
+  }
+  if (!d.config.migraciones.includes('cuentas-hora-2026-11')) {
+    // Desde el 6-nov los pagos llevan la hora y los que se pagaron sin elegir cuenta se avisan para descontarlos de la cuenta real.
+    // Lo anterior ya estaba dentro de los saldos que Diego puso el 3-nov, así que no se toca.
+    d.config.conciliarDesde ||= '2026-11-06';
+    d.config.migraciones.push('cuentas-hora-2026-11');
     cambio = true;
   }
   return cambio;
@@ -548,6 +555,37 @@ function moverSaldo(e, signo) {
   c.fecha = todayISO();
 }
 export const cuentaDinero = (id) => state.data.cuentasDinero.find((c) => c.id === id);
+// Efectivo y tarjeta de crédito no salen de una cuenta del banco en el momento de comprar.
+export const esMedioSinCuenta = (medio) => /efectivo|tarjeta de cr|cr[eé]dito|\btc\b|rappi card/i.test(medio || '');
+
+// Orden de pago: lo más reciente primero, con la hora para desempatar los pagos del mismo día (sin hora = al comienzo del día;
+// si tampoco la hora sirve, manda el orden en que se registraron).
+export const marcaPago = (x) => `${x.fecha || ''} ${x.hora || '00:00'}`;
+export function ordenPago(a, b) {
+  const lista = state.data.movimientos;
+  return marcaPago(b).localeCompare(marcaPago(a)) || lista.indexOf(b) - lista.indexOf(a);
+}
+
+// Pagos hechos (desde `conciliarDesde`) que no salieron de ninguna cuenta: el plan no los descontó. No cuentan efectivo ni tarjeta de
+// crédito, ni lo que ya se dijo que "ya estaba en mi saldo" (`sinCuenta`).
+export function pagosSinCuenta() {
+  const D = state.data;
+  if (!D.cuentasDinero.length) return [];
+  const desde = D.config.conciliarDesde || '';
+  const hoy = todayISO();
+  return D.movimientos.filter((m) => m.estado === 'pagado' && !m.cuentaId && !m.sinCuenta && m.fecha >= desde && m.fecha <= hoy && !esMedioSinCuenta(m.medio) && !m.demo)
+    .sort(ordenPago);
+}
+// `asignaciones`: [{ id, cuentaId }]. Con cuenta, el pago se descuenta de ella; sin cuenta ('' ) queda marcado como "ya estaba en mi saldo".
+export function asignarCuentas(asignaciones) {
+  for (const a of asignaciones) {
+    const m = state.data.movimientos.find((x) => x.id === a.id);
+    if (!m) continue;
+    if (a.cuentaId && cuentaDinero(a.cuentaId)) { const antes = efectoMov(m); m.cuentaId = a.cuentaId; delete m.sinCuenta; moverSaldo(antes, -1); moverSaldo(efectoMov(m), +1); }
+    else { moverSaldo(efectoMov(m), -1); delete m.cuentaId; m.sinCuenta = true; }
+  }
+  save();
+}
 
 // Cuenta que se propone al registrar algo: la última usada con esa fuente o concepto, o la última del tipo, o la primera.
 export function cuentaSugerida(tipo, clave) {
@@ -565,6 +603,8 @@ export function recordarCuenta(tipo, clave, id) {
 
 export function addMov(m) {
   const mov = { id: uid(), estado: 'pagado', medio: '', nota: '', ...m };
+  // Un pago hecho hoy lleva la hora en que se registró (si no se indicó otra); uno de otro día queda sin hora.
+  if (mov.estado === 'pagado' && mov.hora == null) mov.hora = mov.fecha === todayISO() ? nowHHMM() : '';
   state.data.movimientos.push(mov);
   moverSaldo(efectoMov(mov), +1);
   save();
@@ -587,9 +627,13 @@ export function marcarPagado(id, pagado, cuentaId) {
   if (pagado) {
     const hoy = todayISO();
     const mismoMes = hoy.slice(0, 7) === (m.mes || m.fecha.slice(0, 7));
-    updateMov(id, { estado: 'pagado', fecha: mismoMes ? hoy : m.fecha, ...(cuentaId !== undefined ? { cuentaId: cuentaId || undefined } : {}) });
+    const fecha = mismoMes ? hoy : m.fecha;
+    updateMov(id, {
+      estado: 'pagado', fecha, hora: fecha === hoy ? nowHHMM() : '',
+      ...(cuentaId !== undefined ? { cuentaId: cuentaId || undefined, sinCuenta: cuentaId ? undefined : true } : {}),
+    });
   } else {
-    updateMov(id, { estado: 'pendiente' });
+    updateMov(id, { estado: 'pendiente', hora: '' });
   }
 }
 export function delMov(id) {
@@ -600,6 +644,7 @@ export function delMov(id) {
 }
 export function addIngreso(i) {
   const ing = { id: uid(), nota: '', ...i };
+  if (ing.hora == null) ing.hora = ing.fecha === todayISO() ? nowHHMM() : '';
   state.data.ingresos.push(ing);
   moverSaldo(efectoIngreso(ing), +1);
   save();
@@ -834,10 +879,25 @@ function planCajaInterno() {
   // Hormiga y rutinas (domicilios, parqueadero, maduros, huevos…): no son pagos obligatorios, salen de lo que puedes gastar.
   // Lo "ocasional" solo cuenta si se planea con el máximo.
   const conMaximo = D.config.planMaximo !== false;
+  // Lo de hoy que ya se gastó (un domicilio, el parqueadero…) cumple la rutina de hoy: esa vez ya no se espera, porque su gasto
+  // real ya salió de la cuenta. Cada gasto de hoy cumple una sola vez, primero las rutinas fijas y luego las ocasionales.
+  const libresHoy = D.movimientos.filter((m) => m.estado === 'pagado' && m.fecha === hoy && m.tipo !== 'recurrente' && !m.compromisoId);
   const rutinas = D.rutinas.filter((r) => r.activo !== false).map((r) => {
     const fechas = r.cadaDias > 0 ? fechasCada(r, hoy, finGasto) : dias.filter((d) => (parse(d).getDay() + 6) % 7 === r.dia);
     return { r, fechas, veces: fechas.length, total: fechas.length * r.monto, cuenta: !r.ocasional || conMaximo };
   });
+  const deHoy = rutinas.filter((x) => x.fechas.includes(hoy)).sort((a, b) => (a.r.ocasional ? 1 : 0) - (b.r.ocasional ? 1 : 0));
+  const cumplir = (x, coincide) => {
+    const i = libresHoy.findIndex(coincide);
+    if (x.cumplidaHoy || i < 0) return;
+    libresHoy.splice(i, 1);
+    x.fechas = x.fechas.filter((f) => f !== hoy);
+    x.veces = x.fechas.length;
+    x.total = x.fechas.length * x.r.monto;
+    x.cumplidaHoy = true;
+  };
+  for (const x of deHoy) cumplir(x, (m) => m.categoria === x.r.categoria); // misma categoría (un domicilio cumple el domicilio de hoy)
+  for (const x of deHoy.filter((y) => y.r.tipo === 'hormiga')) cumplir(x, (m) => m.tipo === 'hormiga'); // o cualquier otra hormiga de hoy
   const evRut = rutinas.filter((x) => x.cuenta).flatMap((x) => x.fechas.map((fecha) => ({ fecha, clase: 'rutina', monto: -x.r.monto })));
   const rutinaEsperada = sum(rutinas.filter((x) => x.cuenta), (x) => x.total);
   const hormigaNormal = sum(rutinas.filter((x) => x.r.tipo === 'hormiga' && !x.r.ocasional), (x) => x.total);

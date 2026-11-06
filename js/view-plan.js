@@ -288,7 +288,8 @@ export function renderPlan(root) {
 
   // ---- Gastos que se repiten cada semana ----
   const filaRut = (x) => h('tr', {},
-    h('td', {}, h('b', {}, x.r.nombre), x.r.activo === false ? h('div', { class: 'card-sub' }, 'Pausado') : null),
+    h('td', {}, h('b', {}, x.r.nombre), x.r.activo === false ? h('div', { class: 'card-sub' }, 'Pausado') : null,
+      x.cumplidaHoy ? h('div', { class: 'card-sub' }, '✓ Hoy ya lo gastaste: no se vuelve a contar') : null),
     h('td', {}, x.r.tipo === 'hormiga' ? 'Hormiga' : 'Variable'),
     h('td', {}, x.r.cadaDias ? `Cada ${String(x.r.cadaDias).replace('.', ',')} días (próxima ${dayShort(x.r.proximo)})` : DIAS_SEM[x.r.dia]),
     h('td', { class: 'r' }, money(x.r.monto)),
