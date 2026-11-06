@@ -230,6 +230,13 @@ function migrate(d) {
     d.config.migraciones.push('auto-ingresos-2026-11');
     cambio = true;
   }
+  if (!d.config.migraciones.includes('cuentas-reparar-2026-11')) {
+    // La primera versión marcaba como "sin cuenta a propósito" lo que se guardaba sin elegir cuenta (incluso al solo editar un gasto
+    // viejo). Esa marca se quita: esos pagos vuelven a avisarse hasta que se les elija la cuenta de la que salieron.
+    for (const m of d.movimientos) delete m.sinCuenta;
+    d.config.migraciones.push('cuentas-reparar-2026-11');
+    cambio = true;
+  }
   if (!d.config.migraciones.includes('cuentas-hora-2026-11')) {
     // Desde el 6-nov los pagos llevan la hora y los que se pagaron sin elegir cuenta se avisan para descontarlos de la cuenta real.
     // Lo anterior ya estaba dentro de los saldos que Diego puso el 3-nov, así que no se toca.
@@ -567,13 +574,13 @@ export function ordenPago(a, b) {
 }
 
 // Pagos hechos (desde `conciliarDesde`) que no salieron de ninguna cuenta: el plan no los descontó. No cuentan efectivo ni tarjeta de
-// crédito, ni lo que ya se dijo que "ya estaba en mi saldo" (`sinCuenta`).
+// crédito, ni lo que ya se dijo que "ya estaba en mi saldo" (`yaEnSaldo`).
 export function pagosSinCuenta() {
   const D = state.data;
   if (!D.cuentasDinero.length) return [];
   const desde = D.config.conciliarDesde || '';
   const hoy = todayISO();
-  return D.movimientos.filter((m) => m.estado === 'pagado' && !m.cuentaId && !m.sinCuenta && m.fecha >= desde && m.fecha <= hoy && !esMedioSinCuenta(m.medio) && !m.demo)
+  return D.movimientos.filter((m) => m.estado === 'pagado' && !m.cuentaId && !m.yaEnSaldo && m.fecha >= desde && m.fecha <= hoy && !esMedioSinCuenta(m.medio) && !m.demo)
     .sort(ordenPago);
 }
 // `asignaciones`: [{ id, cuentaId }]. Con cuenta, el pago se descuenta de ella; sin cuenta ('' ) queda marcado como "ya estaba en mi saldo".
@@ -581,8 +588,8 @@ export function asignarCuentas(asignaciones) {
   for (const a of asignaciones) {
     const m = state.data.movimientos.find((x) => x.id === a.id);
     if (!m) continue;
-    if (a.cuentaId && cuentaDinero(a.cuentaId)) { const antes = efectoMov(m); m.cuentaId = a.cuentaId; delete m.sinCuenta; moverSaldo(antes, -1); moverSaldo(efectoMov(m), +1); }
-    else { moverSaldo(efectoMov(m), -1); delete m.cuentaId; m.sinCuenta = true; }
+    if (a.cuentaId && cuentaDinero(a.cuentaId)) { const antes = efectoMov(m); m.cuentaId = a.cuentaId; delete m.yaEnSaldo; moverSaldo(antes, -1); moverSaldo(efectoMov(m), +1); }
+    else { moverSaldo(efectoMov(m), -1); delete m.cuentaId; m.yaEnSaldo = true; }
   }
   save();
 }
@@ -630,7 +637,7 @@ export function marcarPagado(id, pagado, cuentaId) {
     const fecha = mismoMes ? hoy : m.fecha;
     updateMov(id, {
       estado: 'pagado', fecha, hora: fecha === hoy ? nowHHMM() : '',
-      ...(cuentaId !== undefined ? { cuentaId: cuentaId || undefined, sinCuenta: cuentaId ? undefined : true } : {}),
+      ...(cuentaId !== undefined ? { cuentaId: cuentaId || undefined, yaEnSaldo: cuentaId ? undefined : true } : {}),
     });
   } else {
     updateMov(id, { estado: 'pendiente', hora: '' });

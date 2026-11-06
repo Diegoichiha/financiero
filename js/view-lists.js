@@ -184,14 +184,22 @@ export function movForm(ini) {
   const fMedio = select([{ value: '', label: '—' }, ...state.data.medios.map((m) => ({ value: m, label: m }))], ini.medio || '');
   // De qué cuenta salió la plata: se descuenta de "Tengo hoy" en el Plan del mes (efectivo y tarjeta no descuentan de una cuenta).
   const cuentaOk = (id) => (state.data.cuentasDinero.some((c) => c.id === id) ? id : '');
-  const fCuenta = selectorCuenta(ini.id ? cuentaOk(ini.cuentaId) : (esMedioSinCuenta(ini.medio) ? '' : cuentaSugerida('gasto', ini.concepto)), 'gasto');
-  fMedio.addEventListener('change', () => { fCuenta.value = esMedioSinCuenta(fMedio.value) ? '' : (fCuenta.value || cuentaSugerida('gasto', '')); });
+  // Lo que tú eliges a mano manda: el autocompletado (por concepto) nunca lo pisa.
+  const tocado = new Set();
+  const fCuenta = selectorCuenta(ini.id
+    ? (cuentaOk(ini.cuentaId) || (ini.estado === 'pagado' && !ini.yaEnSaldo && !esMedioSinCuenta(ini.medio) ? cuentaSugerida('gasto', ini.concepto) : ''))
+    : (esMedioSinCuenta(ini.medio) ? '' : cuentaSugerida('gasto', ini.concepto)), 'gasto');
+  fCuenta.addEventListener('change', () => tocado.add('cuenta'));
+  fMedio.addEventListener('change', () => { tocado.add('medio'); fCuenta.value = esMedioSinCuenta(fMedio.value) ? '' : (fCuenta.value || cuentaSugerida('gasto', '')); });
+  fCentro.addEventListener('change', () => tocado.add('centro'));
   const fNota = h('input', { type: 'text', value: ini.nota || '', placeholder: 'Opcional' });
   const fComp = select([{ value: '', label: '— Ninguno —' }, ...[...state.data.compromisos].sort((a, b) => a.fecha.localeCompare(b.fecha)).map((c) => ({ value: c.id, label: c.nombre }))], ini.compromisoId || '');
   const fEstado = select([{ value: 'pagado', label: 'Pagado' }, { value: 'pendiente', label: 'Pendiente' }], ini.estado || 'pagado');
   const catWrap = h('div', {}, fCat);
   const seg = h('div', { class: 'seg small', role: 'group', 'aria-label': 'Tipo de gasto' });
+  catWrap.addEventListener('change', () => tocado.add('categoria'));
   const pintarSeg = () => seg.replaceChildren(...TIPOS.map((t) => h('button', { type: 'button', 'aria-pressed': String(t.id === tipo), onclick: () => {
+    tocado.add('tipo');
     tipo = t.id;
     fCat = select(catOpts(tipo), catOpts(tipo)[0]?.value);
     catWrap.replaceChildren(fCat);
@@ -203,15 +211,17 @@ export function movForm(ini) {
   fConcepto.addEventListener('change', () => {
     const q = fConcepto.value.trim().toLowerCase();
     const prev = [...state.data.movimientos].reverse().find((m) => m.concepto.toLowerCase() === q);
-    if (!prev) return;
-    tipo = prev.tipo;
-    fCat = select(catOpts(tipo), prev.categoria);
-    catWrap.replaceChildren(fCat);
-    pintarSeg();
+    if (!prev || ini.id) return;
+    if (!tocado.has('tipo') && !tocado.has('categoria')) {
+      tipo = prev.tipo;
+      fCat = select(catOpts(tipo), prev.categoria);
+      catWrap.replaceChildren(fCat);
+      pintarSeg();
+    }
     if (!fMonto.getValue()) fMonto.value = num(prev.monto);
-    fCentro.value = prev.centro;
-    fMedio.value = prev.medio || '';
-    fCuenta.value = esMedioSinCuenta(prev.medio) ? '' : (cuentaOk(prev.cuentaId) || cuentaSugerida('gasto', prev.concepto));
+    if (!tocado.has('centro')) fCentro.value = prev.centro;
+    if (!tocado.has('medio')) fMedio.value = prev.medio || '';
+    if (!tocado.has('cuenta')) fCuenta.value = esMedioSinCuenta(fMedio.value) ? '' : (cuentaOk(prev.cuentaId) || cuentaSugerida('gasto', prev.concepto));
   });
 
   const lista = [...new Set(state.data.movimientos.map((m) => m.concepto))].slice(-80);
@@ -243,8 +253,7 @@ export function movForm(ini) {
     return {
       fecha: fFecha.value, hora, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo, categoria: fCat.value,
       centro: fCentro.value, medio: fMedio.value, nota: fNota.value.trim(), compromisoId: fComp.value || undefined, cuentaId: fCuenta.value || undefined,
-      // Elegir "Ninguna" a propósito (efectivo, tarjeta o "ya estaba en mi saldo") es una decisión: no se vuelve a avisar.
-      sinCuenta: state.data.cuentasDinero.length && !fCuenta.value ? true : undefined,
+      yaEnSaldo: fCuenta.value ? undefined : ini.yaEnSaldo,
       ...(ini.id ? { estado } : {}),
     };
   };
@@ -274,7 +283,7 @@ export function renderMovimientos(root) {
     addMov(r);
     recordarCuenta('gasto', r.concepto, r.cuentaId);
     enfocarConcepto = true;
-    toast(avisoCuenta('gasto', r.monto, r.cuentaId) || 'Agregado: ' + r.concepto);
+    toast(avisoCuenta('gasto', r.monto, r.cuentaId) || (state.data.cuentasDinero.length && !esMedioSinCuenta(r.medio) ? `Agregado: ${r.concepto} · OJO: no se descontó de ninguna cuenta` : 'Agregado: ' + r.concepto));
     hooks.rerender();
   };
   const formCard = h('section', { class: 'card' },
@@ -286,7 +295,14 @@ export function renderMovimientos(root) {
   const editar = (m) => {
     const f = movForm(m);
     modal('Editar movimiento', f.nodes, {
-      onSave: () => { const r = f.read(); if (typeof r === 'string') return r; updateMov(m.id, r); recordarCuenta('gasto', r.concepto, r.cuentaId); hooks.rerender(); },
+      onSave: () => {
+        const r = f.read(); if (typeof r === 'string') return r;
+        const antes = m.cuentaId;
+        updateMov(m.id, r);
+        recordarCuenta('gasto', r.concepto, r.cuentaId);
+        if (r.estado === 'pagado' && r.cuentaId && r.cuentaId !== antes) toast(avisoCuenta('gasto', r.monto, r.cuentaId));
+        hooks.rerender();
+      },
       peligro: { label: 'Eliminar', fn: () => { delMov(m.id); hooks.rerender(); } },
     });
   };
@@ -314,8 +330,11 @@ export function renderMovimientos(root) {
       h('td', {}, tipoDot(m.tipo)),
       h('td', {}, centroNombre(m.centro)),
       h('td', {}, m.medio || '—',
-        m.cuentaId && m.estado === 'pagado' && nombreCuenta(m.cuentaId) ? h('div', { class: 'card-sub' }, '↳ ' + nombreCuenta(m.cuentaId)) : null,
-        sinCuentaIds.has(m.id) ? h('div', {}, h('button', { class: 'chip alerta', title: 'Elegir de qué cuenta salió y descontarlo', onclick: () => modalPagosSinCuenta([m]) }, 'Sin cuenta · descontar')) : null),
+        m.estado === 'pagado' && m.cuentaId && nombreCuenta(m.cuentaId)
+          ? h('div', {}, h('button', { class: 'chip cuenta', title: 'Cambiar la cuenta de la que salió', onclick: () => modalPagosSinCuenta([m]) }, '↳ ' + nombreCuenta(m.cuentaId)))
+          : null,
+        sinCuentaIds.has(m.id) ? h('div', {}, h('button', { class: 'chip alerta', title: 'Elegir de qué cuenta salió y descontarlo', onclick: () => modalPagosSinCuenta([m]) }, 'Sin cuenta · descontar')) : null,
+        m.estado === 'pagado' && m.yaEnSaldo && !m.cuentaId ? h('div', {}, h('button', { class: 'chip cuenta', title: 'Elegir una cuenta para descontarlo', onclick: () => modalPagosSinCuenta([m]) }, '↳ ya estaba en mi saldo')) : null),
       h('td', { class: 'r' }, money(m.monto)),
       h('td', {}, m.estado === 'pendiente'
         ? h('button', { class: 'chip', title: 'Marcar como pagado', onclick: () => pagarMov(m) }, 'Pendiente · pagar')

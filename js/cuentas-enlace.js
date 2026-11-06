@@ -59,29 +59,35 @@ export function desmarcarPago(m, alTerminar) {
 export function modalPagosSinCuenta(soloEstos) {
   const lista = soloEstos || pagosSinCuenta();
   if (!lista.length) { toast('No hay pagos sin cuenta.'); return; }
-  const filas = lista.map((m) => ({ m, sel: selectorCuenta(cuentaSugerida('gasto', m.concepto), 'gasto', 'Ninguna: ya estaba descontado de mi saldo') }));
+  // Cada pago empieza en la cuenta que ya tiene; si no tiene, en la sugerida (o en "Ninguna" si dijiste que ya estaba en tu saldo).
+  const inicial = (m) => (m.cuentaId && cuentaDinero(m.cuentaId) ? m.cuentaId : (m.yaEnSaldo ? '' : cuentaSugerida('gasto', m.concepto)));
+  const filas = lista.map((m) => ({ m, sel: selectorCuenta(inicial(m), 'gasto', 'Ninguna: ya estaba descontado de mi saldo') }));
   const efecto = h('div', { class: 'card-sub full', 'aria-live': 'polite' });
   const pintar = () => {
-    const por = new Map();
-    for (const { m, sel } of filas) if (sel.value) por.set(sel.value, (por.get(sel.value) || 0) + m.monto);
-    efecto.replaceChildren(...(por.size
-      ? [...por].map(([id, total]) => h('div', {}, `${nombreCuenta(id)}: hoy ${money(cuentaDinero(id).saldo)} → quedará ${money(cuentaDinero(id).saldo - total)}`))
-      : [h('div', {}, 'No se descontará de ninguna cuenta.')]));
+    // Lo que cambia en cada cuenta: se devuelve lo que ya tenía descontado y se descuenta de la nueva.
+    const delta = new Map();
+    for (const { m, sel } of filas) {
+      if (m.cuentaId && m.estado === 'pagado') delta.set(m.cuentaId, (delta.get(m.cuentaId) || 0) + m.monto);
+      if (sel.value) delta.set(sel.value, (delta.get(sel.value) || 0) - m.monto);
+    }
+    const lineas = [...delta].filter(([id, d]) => d && cuentaDinero(id)).map(([id, d]) => h('div', {}, `${nombreCuenta(id)}: hoy ${money(cuentaDinero(id).saldo)} → quedará ${money(cuentaDinero(id).saldo + d)}`));
+    efecto.replaceChildren(...(lineas.length ? lineas : [h('div', {}, 'No cambia el saldo de ninguna cuenta.')]));
   };
   filas.forEach(({ sel }) => sel.addEventListener('change', pintar));
   pintar();
-  modal(lista.length === 1 ? `¿De qué cuenta pagaste «${lista[0].concepto}»?` : 'Pagos que no se han descontado de ninguna cuenta', [
+  modal(lista.length === 1 ? `¿De qué cuenta salió «${lista[0].concepto}»?` : 'Pagos que no se han descontado de ninguna cuenta', [
     h('div', { class: 'card-sub full' }, 'Elige la cuenta de donde salió cada pago y se descuenta de "Tengo hoy": así el plan queda al día. Si ya lo habías restado de tu saldo, elige "Ninguna".'),
     ...filas.map(({ m, sel }) => field(`${m.concepto} · ${money(m.monto)} · ${dayShort(m.fecha)}${m.hora ? ' ' + m.hora : ''}`, sel, 'full')),
     efecto,
   ], {
-    guardar: 'Descontar',
+    guardar: 'Guardar',
     onSave: () => {
       for (const { m, sel } of filas) recordarCuenta('gasto', m.concepto, sel.value);
       const mensajes = filas.filter(({ sel }) => sel.value).map(({ m, sel }) => ({ id: m.id, cuentaId: sel.value, monto: m.monto }));
       asignarCuentas(filas.map(({ m, sel }) => ({ id: m.id, cuentaId: sel.value })));
       const total = sum(mensajes, (x) => x.monto);
-      toast(mensajes.length ? `Se descontaron ${money(total)} de tus cuentas` : 'Listo: quedaron como ya descontados');
+      const uno = filas.length === 1 && mensajes.length === 1 ? cuentaDinero(mensajes[0].cuentaId) : null;
+      toast(uno ? `${money(total)} salen de ${uno.nombre} · ahora tiene ${money(uno.saldo)}` : mensajes.length ? `Se descontaron ${money(total)} de tus cuentas` : 'Listo: quedaron como ya descontados');
       hooks.rerender();
     },
   });

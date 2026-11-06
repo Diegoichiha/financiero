@@ -563,3 +563,5 @@ button.cta[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0
 .cta.total .nm, .cta.total .sb { color: var(--res-ink); opacity: 0.82; }
 button.chip.alerta { margin-top: 4px; border-color: color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--ink); }
 button.chip.alerta:hover { background: color-mix(in srgb, var(--warn) 26%, var(--surface)); }
+button.chip.cuenta { margin-top: 4px; padding: 1px 8px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
+button.chip.cuenta:hover { color: var(--ink); }
