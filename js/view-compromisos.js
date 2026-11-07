@@ -120,7 +120,11 @@ export function abrirGastoReal(c) {
     restoTit.textContent = `El resto (${money(resto)}) sale de`;
     const cu = cuentaDinero(fCuenta.value);
     if (resto < 0) info.textContent = `Las partes suman ${money(partes + propio)}, más que el gasto real (${money(real)}). Sube el gasto real o baja una parte.`;
-    else if (resto > 0) info.textContent = cu ? `${money(resto)} salen de ${cu.nombre} (hoy ${money(cu.saldo)} → quedará ${money(cu.saldo - resto)}).` : `${money(resto)} se registran sin descontar de ninguna cuenta.`;
+    else if (resto > 0) {
+      // lo que este mismo gasto ya tenía descontado de esa cuenta se devuelve antes de volver a descontar
+      const yaDescontado = cu ? sum(ajustes.filter((x) => x.cuentaId === cu.id)) : 0;
+      info.textContent = cu ? `${money(resto)} salen de ${cu.nombre} (${money(cu.saldo + yaDescontado)} → quedará ${money(cu.saldo + yaDescontado - resto)}).` : `${money(resto)} se registran sin descontar de ninguna cuenta.`;
+    }
     else info.textContent = partes > 0 ? 'Todo el gasto ya estaba pagado dentro de esas compras: no se descuenta de ninguna cuenta.' : '';
   };
   const agregarFila = (ref, monto) => {

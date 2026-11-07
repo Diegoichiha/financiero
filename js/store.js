@@ -749,6 +749,7 @@ export function sincronizarAutomaticos() {
       cambio = true;
     }
   }
+  if (sincronizarGastosReales()) cambio = true;
   // Pagos hechos (desde `conciliarDesde`) que quedaron sin cuenta: se descuentan solos de la cuenta sugerida. Nada que pulsar.
   const sinCuenta = pagosSinCuenta();
   if (sinCuenta.length) {
@@ -786,7 +787,15 @@ export function todasLasCompras() {
 }
 export const buscarCompra = (ref) => todasLasCompras().find((x) => x.ref === ref) || null;
 
-export const compromisoGastado = (id) => sum(todasLasCompras(), ({ ref, obj }) => (ref[0] === 'm' && obj.compromisoId === id ? obj.monto : sum((obj.atribuciones || []).filter((a) => a.compromisoId === id), (a) => a.monto)));
+// Lo atribuido a un compromiso desde otras compras (gastos pagados o compras de la tarjeta).
+export const atribuidoACompromiso = (id) => sum(todasLasCompras(), ({ obj }) => sum((obj.atribuciones || []).filter((a) => a.compromisoId === id), (a) => a.monto));
+// Lo gastado de un compromiso. Si ya tiene su gasto real puesto, ESE es el gasto (atribuir algo a una compra NO lo cambia: solo dice que esa
+// parte ya estaba pagada y no sale de una cuenta). Si no, es la suma de sus gastos y de lo atribuido.
+export const compromisoGastado = (id) => {
+  const c = state.data.compromisos.find((x) => x.id === id);
+  if (c && c.gastoReal != null) return Math.max(Math.round(c.gastoReal), gastoPropio(id) + atribuidoACompromiso(id));
+  return sum(todasLasCompras(), ({ ref, obj }) => (ref[0] === 'm' && obj.compromisoId === id ? obj.monto : sum((obj.atribuciones || []).filter((a) => a.compromisoId === id), (a) => a.monto)));
+};
 // Todo lo que se contó a un compromiso, con su compra de origen: [{ m, ref, tarjeta, monto, parcial }]
 export function gastosDeCompromiso(id) {
   const out = [];
@@ -811,6 +820,33 @@ export const esAjusteReal = (m) => !!m.compromisoId && (m.ajuste || / \(gasto re
 export const ajustesDeCompromiso = (id) => state.data.movimientos.filter((m) => m.compromisoId === id && esAjusteReal(m));
 // Lo registrado directamente al compromiso (con "+ Gasto"), sin el ajuste que se reemplaza.
 export const gastoPropio = (id) => sum(state.data.movimientos.filter((m) => m.compromisoId === id && !esAjusteReal(m)));
+
+// Con el gasto real puesto, el gasto de "relleno" (lo que ni está registrado ni atribuido) se mantiene en: real − gastos propios − atribuido. Así atribuir
+// parte del gasto a una compra, desde donde sea, solo baja lo que se descuenta de la cuenta (devolviéndole esa plata) y el gasto real no cambia.
+function sincronizarGastosReales() {
+  let cambio = false;
+  for (const c of state.data.compromisos) {
+    if (c.gastoReal == null) continue;
+    const [plug, ...sobran] = ajustesDeCompromiso(c.id);
+    for (const x of sobran) { delMov(x.id); cambio = true; }
+    const deseado = Math.max(0, Math.round(c.gastoReal - gastoPropio(c.id) - atribuidoACompromiso(c.id)));
+    if (plug && plug.cuentaId) c.cuentaGastoReal = plug.cuentaId; // se recuerda de qué cuenta salía, por si vuelve a hacer falta
+    if (deseado === 0) {
+      if (plug) { delMov(plug.id); cambio = true; }
+    } else if (plug) {
+      if (Math.round(plug.monto) !== deseado) { updateMov(plug.id, { monto: deseado }); cambio = true; }
+    } else {
+      const hoy = todayISO();
+      const cuenta = cuentaDinero(c.cuentaGastoReal) ? c.cuentaGastoReal : '';
+      addMov({
+        fecha: (c.fechaFin || c.fecha) <= hoy ? (c.fechaFin || c.fecha) : hoy, hora: '', concepto: c.nombre + ' (gasto real)', monto: deseado, tipo: 'variable', categoria: 'otros-var',
+        centro: 'hogar', medio: '', compromisoId: c.id, ajuste: true, cuentaId: cuenta || undefined, yaEnSaldo: cuenta ? undefined : true,
+      });
+      cambio = true;
+    }
+  }
+  return cambio;
+}
 
 function quitarAtribuciones(compromisoId) {
   for (const { obj } of todasLasCompras()) {
@@ -849,6 +885,7 @@ export function guardarGastoReal(id, { real, partes = [], cuentaId = '', categor
     });
   }
   c.gastoReal = Math.round(real);
+  if (resto > 0) { if (cuentaId) c.cuentaGastoReal = cuentaId; else delete c.cuentaGastoReal; }
   delete c.cerrado;
   save();
   return { mov, resto, atribuido: atribuidoTotal };
