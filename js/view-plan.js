@@ -1,14 +1,14 @@
 // Pestaña Plan del mes: cuánta plata hay hoy, cuánta entra y cuándo, a dónde se va (mercado, hormiga, rutinas,
 // compromisos, pagos) y cuánto se puede gastar en cada compromiso, por quincenas y fecha a fecha.
 import {
-  h, money, uid, todayISO, dayShort, monthName, pct,
+  h, money, uid, todayISO, addDays, dayShort, monthName, pct,
 } from './util.js';
 import {
-  state, hooks, planCaja, saveCuentaDinero, delCuentaDinero, setPlanConfig, saveCompromiso, compromisoGastado, compromisosPorAjustar, atribuido, netoCompra, saveRutina, delRutina, setPlanMaximo,
+  state, hooks, planCaja, saveCuentaDinero, delCuentaDinero, setPlanConfig, saveCompromiso, compromisoGastado, compromisosPorAjustar, atribuido, netoCompra, saveRutina, delRutina, setPlanMaximo, marcaPago,
 } from './store.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
 import { card, lineaSaldo } from './charts.js';
-import { movForm, ingresoForm } from './view-lists.js';
+import { movForm, ingresoForm, editarMov } from './view-lists.js';
 import { pagarMov, avisoCuenta, movimientoHoy } from './cuentas-enlace.js';
 import { addIngreso, addMov, recordarCuenta } from './store.js';
 import { TIPOS_COMPROMISO, abrirGastoReal } from './view-compromisos.js';
@@ -134,10 +134,24 @@ export function renderPlan(root) {
   const filaCuenta = (c) => {
     const inp = moneyInput(c.saldo, { 'aria-label': 'Saldo de ' + c.nombre, class: 'mny' });
     inp.addEventListener('change', () => { saveCuentaDinero({ ...c, saldo: inp.getValue(), fecha: todayISO() }); hooks.rerender(); });
-    return h('div', { class: 'list-item' },
-      h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, 'Saldo al ' + dayShort(c.fecha) + (movimientoHoy(c.id) ? ' · ' + movimientoHoy(c.id) : ''))),
-      h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } }, inp,
-        h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + c.nombre, onclick: () => modalCuenta(c) }, '✎')));
+    // Lo que movió este saldo en los últimos días (cada gasto se abre para corregirlo): para ver de dónde sale cada diferencia.
+    const desde = addDays(todayISO(), -7);
+    const movs = [
+      ...state.data.movimientos.filter((m) => m.estado === 'pagado' && m.cuentaId === c.id && m.fecha >= desde).map((m) => ({ m, signo: -1, texto: m.concepto })),
+      ...state.data.ingresos.filter((i) => i.cuentaId === c.id && i.fecha >= desde).map((i) => ({ m: i, signo: 1, texto: i.fuente })),
+    ].sort((a, b) => marcaPago(b.m).localeCompare(marcaPago(a.m))).slice(0, 15);
+    const detalle = movs.length ? h('details', { class: 'full' }, h('summary', {}, '¿Qué movió este saldo?'),
+      movs.map(({ m, signo, texto }) => h('div', { class: 'list-item' },
+        h('div', {}, h('div', { class: 'name' }, texto), h('div', { class: 'meta' }, dayShort(m.fecha) + (m.hora ? ' ' + m.hora : '') + (signo < 0 ? '' : ' · ingreso'))),
+        signo < 0
+          ? h('button', { class: 'btn ghost sm num', title: 'Abrir para corregirlo', onclick: () => editarMov(m) }, '− ' + money(m.monto))
+          : h('span', { class: 'amt num' }, '+ ' + money(m.monto))))) : null;
+    return h('div', {},
+      h('div', { class: 'list-item' },
+        h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, 'Saldo al ' + dayShort(c.fecha) + (movimientoHoy(c.id) ? ' · ' + movimientoHoy(c.id) : ''))),
+        h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } }, inp,
+          h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + c.nombre, onclick: () => modalCuenta(c) }, '✎'))),
+      detalle);
   };
   const cCuentas = h('section', { class: 'card w2 det', style: '--c: var(--s1)' },
     h('div', { class: 'card-head' }, h('div', {}, h('div', { class: 'card-title' }, 'Tengo hoy'), h('div', { class: 'card-sub' }, 'Actualiza el saldo cuando quieras')),

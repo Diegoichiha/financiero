@@ -101,8 +101,8 @@ export function abrirGastoReal(c) {
   const { lista, preferida } = comprasParaAtribuir(c);
   const cuentas = state.data.cuentasDinero;
   const fReal = moneyInput(c.gastoReal != null ? c.gastoReal : compromisoGastado(c.id));
-  const cuentaInicial = ajustes.length ? (ajustes.find((x) => x.cuentaId)?.cuentaId || '') : (cuentas.length ? cuentaSugerida('gasto', '') : '');
-  const fCuenta = select([...cuentas.map((x) => ({ value: x.id, label: `${x.nombre} · hoy ${money(x.saldo)}` })), { value: '', label: 'Ninguna: efectivo o ya estaba en mi saldo' }], cuentaInicial);
+  const cuentaInicial = ajustes.find((x) => x.cuentaId)?.cuentaId || ''; // solo se descuenta de una cuenta si tú la eliges
+  const fCuenta = select([...cuentas.map((x) => ({ value: x.id, label: `${x.nombre} · hoy ${money(x.saldo)}` })), { value: '', label: 'Ninguna: no se descuenta de ninguna cuenta' }], cuentaInicial);
   const presu = h('div', { class: 'card-sub full' });
   const filasHost = h('div', { class: 'full' });
   const restoTit = h('span', {});
@@ -124,7 +124,7 @@ export function abrirGastoReal(c) {
     else if (resto > 0) {
       // lo que este mismo gasto ya tenía descontado de esa cuenta se devuelve antes de volver a descontar
       const yaDescontado = cu ? sum(ajustes.filter((x) => x.cuentaId === cu.id)) : 0;
-      info.textContent = cu ? `${money(resto)} salen de ${cu.nombre} (${money(cu.saldo + yaDescontado)} → quedará ${money(cu.saldo + yaDescontado - resto)}).` : `${money(resto)} se registran sin descontar de ninguna cuenta.`;
+      info.textContent = cu ? `${money(resto)} salen de ${cu.nombre} (${money(cu.saldo + yaDescontado)} → quedará ${money(cu.saldo + yaDescontado - resto)}).` : `${money(resto)} se registran sin descontar de ninguna cuenta (elige una cuenta solo si quieres descontarlos).`;
     }
     else info.textContent = partes > 0 ? 'Todo el gasto ya estaba pagado dentro de esas compras: no se descuenta de ninguna cuenta.' : '';
   };

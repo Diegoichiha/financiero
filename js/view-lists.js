@@ -186,9 +186,9 @@ export function movForm(ini) {
   const cuentaOk = (id) => (state.data.cuentasDinero.some((c) => c.id === id) ? id : '');
   // Lo que tú eliges a mano manda: el autocompletado (por concepto) nunca lo pisa.
   const tocado = new Set();
-  const fCuenta = selectorCuenta(ini.id
-    ? (cuentaOk(ini.cuentaId) || (ini.estado === 'pagado' && !ini.yaEnSaldo && !esMedioSinCuenta(ini.medio) ? cuentaSugerida('gasto', ini.concepto) : ''))
-    : (esMedioSinCuenta(ini.medio) ? '' : cuentaSugerida('gasto', ini.concepto)), 'gasto');
+  // Al EDITAR algo que no tiene cuenta no se propone ninguna: ya estaba dentro de tu saldo, y guardar (por ejemplo para atribuir una parte a un
+  // compromiso) no debe volver a descontarlo.
+  const fCuenta = selectorCuenta(ini.id ? cuentaOk(ini.cuentaId) : (esMedioSinCuenta(ini.medio) ? '' : cuentaSugerida('gasto', ini.concepto)), 'gasto');
   fCuenta.addEventListener('change', () => tocado.add('cuenta'));
   fMedio.addEventListener('change', () => { tocado.add('medio'); fCuenta.value = esMedioSinCuenta(fMedio.value) ? '' : (fCuenta.value || cuentaSugerida('gasto', '')); });
   fCentro.addEventListener('change', () => tocado.add('centro'));
@@ -271,6 +271,22 @@ export function movForm(ini) {
   return { nodes, read, reset, focus: () => fConcepto.focus() };
 }
 
+// Editar un gasto (desde Gastos o desde "¿Qué movió este saldo?").
+export function editarMov(m) {
+  const f = movForm(m);
+  modal('Editar movimiento', f.nodes, {
+    onSave: () => {
+      const r = f.read(); if (typeof r === 'string') return r;
+      const antes = m.cuentaId;
+      updateMov(m.id, r);
+      recordarCuenta('gasto', r.concepto, r.cuentaId);
+      if (r.estado === 'pagado' && r.cuentaId && r.cuentaId !== antes) toast(avisoCuenta('gasto', r.monto, r.cuentaId));
+      hooks.rerender();
+    },
+    peligro: { label: 'Eliminar', fn: () => { delMov(m.id); hooks.rerender(); } },
+  });
+}
+
 const filtrosMov = { q: '', tipo: 'todos', soloPend: false, cuenta: '' };
 
 export function renderMovimientos(root) {
@@ -302,20 +318,7 @@ export function renderMovimientos(root) {
       ...form.nodes,
       h('button', { type: 'submit', class: 'btn primary', style: { height: '34px' } }, 'Agregar')));
 
-  const editar = (m) => {
-    const f = movForm(m);
-    modal('Editar movimiento', f.nodes, {
-      onSave: () => {
-        const r = f.read(); if (typeof r === 'string') return r;
-        const antes = m.cuentaId;
-        updateMov(m.id, r);
-        recordarCuenta('gasto', r.concepto, r.cuentaId);
-        if (r.estado === 'pagado' && r.cuentaId && r.cuentaId !== antes) toast(avisoCuenta('gasto', r.monto, r.cuentaId));
-        hooks.rerender();
-      },
-      peligro: { label: 'Eliminar', fn: () => { delMov(m.id); hooks.rerender(); } },
-    });
-  };
+  const editar = editarMov;
 
   // Solo se vuelven a pintar los chips y la tabla (el formulario conserva lo que estés escribiendo).
   const cuentasHost = h('div', {});

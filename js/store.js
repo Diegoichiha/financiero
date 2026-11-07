@@ -830,17 +830,15 @@ function sincronizarGastosReales() {
     const [plug, ...sobran] = ajustesDeCompromiso(c.id);
     for (const x of sobran) { delMov(x.id); cambio = true; }
     const deseado = Math.max(0, Math.round(c.gastoReal - gastoPropio(c.id) - atribuidoACompromiso(c.id)));
-    if (plug && plug.cuentaId) c.cuentaGastoReal = plug.cuentaId; // se recuerda de qué cuenta salía, por si vuelve a hacer falta
     if (deseado === 0) {
       if (plug) { delMov(plug.id); cambio = true; }
     } else if (plug) {
       if (Math.round(plug.monto) !== deseado) { updateMov(plug.id, { monto: deseado }); cambio = true; }
     } else {
       const hoy = todayISO();
-      const cuenta = cuentaDinero(c.cuentaGastoReal) ? c.cuentaGastoReal : '';
       addMov({
         fecha: (c.fechaFin || c.fecha) <= hoy ? (c.fechaFin || c.fecha) : hoy, hora: '', concepto: c.nombre + ' (gasto real)', monto: deseado, tipo: 'variable', categoria: 'otros-var',
-        centro: 'hogar', medio: '', compromisoId: c.id, ajuste: true, cuentaId: cuenta || undefined, yaEnSaldo: cuenta ? undefined : true,
+        centro: 'hogar', medio: '', compromisoId: c.id, ajuste: true, yaEnSaldo: true, // si hace falta de nuevo, se registra SIN descontar de ninguna cuenta: tú eliges la cuenta en "Gasto real"
       });
       cambio = true;
     }
@@ -885,7 +883,6 @@ export function guardarGastoReal(id, { real, partes = [], cuentaId = '', categor
     });
   }
   c.gastoReal = Math.round(real);
-  if (resto > 0) { if (cuentaId) c.cuentaGastoReal = cuentaId; else delete c.cuentaGastoReal; }
   delete c.cerrado;
   save();
   return { mov, resto, atribuido: atribuidoTotal };
