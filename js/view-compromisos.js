@@ -95,6 +95,7 @@ function comprasParaAtribuir(c) {
 // Gasto real de un compromiso: su presupuesto arriba, el gasto real (el que quieras) y, si ya estaba pagado dentro de una compra o de la tarjeta,
 // se atribuye el total o una parte a ella (no se descuenta otra vez). Lo que no esté en ninguna compra sale de la cuenta que elijas.
 export function abrirGastoReal(c) {
+  const deMas = planCaja().deMas; // lo que sobra por si algún compromiso necesita más dinero
   const propio = gastoPropio(c.id); // gastos puestos directamente al compromiso con "+ Gasto"
   const ajustes = ajustesDeCompromiso(c.id);
   const { lista, preferida } = comprasParaAtribuir(c);
@@ -115,7 +116,7 @@ export function abrirGastoReal(c) {
     const partes = suma();
     const resto = restoActual();
     const dif = c.presupuesto - real;
-    presu.textContent = c.presupuesto > 0 ? `Presupuesto ${money(c.presupuesto)} · ${dif >= 0 ? `te quedan ${money(dif)}` : `te pasaste por ${money(-dif)}`}` : 'Sin presupuesto';
+    presu.textContent = c.presupuesto > 0 ? `Presupuesto ${money(c.presupuesto)} · ${dif >= 0 ? `te quedan ${money(dif)}` : `te pasas por ${money(-dif)}: sale de lo que tienes de más para compromisos (hoy ${money(deMas)})`}` : 'Sin presupuesto';
     restoBox.style.display = resto > 0 && cuentas.length ? '' : 'none';
     restoTit.textContent = `El resto (${money(resto)}) sale de`;
     const cu = cuentaDinero(fCuenta.value);

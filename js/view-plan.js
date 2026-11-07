@@ -309,31 +309,23 @@ export function renderPlan(root) {
         h('tbody', {}, p.rutinas.map(filaRut))))
       : h('div', { class: 'muted' }, 'Agrega lo que gastas cada semana (comida rápida, domicilios, parqueadero…) y verás cuánto de lo que puedes gastar se va en eso.'));
 
-  // ---- Compromisos: tú pones el presupuesto, el plan te dice el máximo ----
+  // ---- Compromisos: tú pones el presupuesto; lo que sobra es lo que tienes de más por si alguno necesita más dinero ----
   const filaComp = (x) => {
     const c = x.c;
     const gastado = compromisoGastado(c.id);
     const inp = moneyInput(c.presupuesto || 0, { 'aria-label': 'Presupuesto de ' + c.nombre, class: 'mny' });
     inp.addEventListener('change', () => { saveCompromiso({ ...c, presupuesto: inp.getValue() }); hooks.rerender(); });
-    const tiene = x.presupuesto > 0;
-    const sobra = tiene ? x.maximo - x.restante : null;
     return h('tr', {},
       h('td', {}, h('b', {}, c.nombre), h('div', { class: 'card-sub' }, tipoLabel(c.tipo))),
       h('td', {}, dayShort(c.fecha) + (c.fechaFin ? ' – ' + dayShort(c.fechaFin) : '')),
       h('td', { class: 'r' }, inp),
-      h('td', { class: 'r' }, gastado > 0 ? money(gastado) : '—'),
-      h('td', { class: 'r' }, h('b', {}, money(x.maximo))),
-      h('td', {}, tiene
-        ? (sobra >= 0 ? h('span', { class: 'estado-ok' }, '✓ Cabe') : h('span', { class: 'status crit' }, `▲ Te pasas por ${money(-sobra)}`))
-        : (x.maximo > 0
-          ? h('button', { class: 'btn sm', title: 'Poner como presupuesto lo máximo que puedes gastar', onclick: () => { saveCompromiso({ ...c, presupuesto: gastado + x.maximo }); toast('Presupuesto: ' + money(gastado + x.maximo)); hooks.rerender(); } }, 'Usar el máximo')
-          : h('span', { class: 'muted' }, 'No hay para este'))));
+      h('td', { class: 'r' }, gastado > 0 ? money(gastado) : '—'));
   };
   const porAjustar = compromisosPorAjustar();
   const cComp = h('section', { class: 'card w6' },
     h('div', { class: 'card-head' }, h('div', {},
       h('div', { class: 'card-title' }, `¿Cuánto presupuesto en cada compromiso de ${mesN}?`),
-      h('div', { class: 'card-sub' }, 'Tú decides cuánto poner en cada uno y lo puedes cambiar cuando quieras. "Máximo" es lo más que podrías gastar en ese compromiso sin dañar tus pagos, tu colchón ni los presupuestos de los demás, contando tu hormiga y rutinas habituales.')),
+      h('div', { class: 'card-sub' }, 'Tú decides cuánto poner en cada uno y lo puedes cambiar cuando quieras.')),
     h('button', { class: 'btn', onclick: () => hooks.goTab('compromisos') }, 'Ver todos los compromisos')),
     porAjustar.length ? h('div', { class: 'callout' },
       h('b', {}, porAjustar.length === 1 ? 'Ya pasó un compromiso: ¿cuánto se gastó de verdad?' : 'Ya pasaron compromisos: ¿cuánto se gastó de verdad?'),
@@ -343,10 +335,13 @@ export function renderPlan(root) {
         h('button', { class: 'btn sm', onclick: () => abrirGastoReal(c) }, 'Poner gasto real')))) : null,
     p.compromisos.length
       ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'Compromiso'), h('th', {}, 'Fecha'), h('th', { class: 'r' }, 'Tu presupuesto'), h('th', { class: 'r' }, 'Ya gastado'), h('th', { class: 'r' }, 'Máximo que puedes gastar'), h('th'))),
+        h('thead', {}, h('tr', {}, h('th', {}, 'Compromiso'), h('th', {}, 'Fecha'), h('th', { class: 'r' }, 'Tu presupuesto'), h('th', { class: 'r' }, 'Ya gastado'))),
         h('tbody', {}, p.compromisos.map(filaComp)),
-        h('tfoot', {}, h('tr', {}, h('td', { colspan: 2 }, 'Presupuestado (lo que falta por gastar)'), h('td', { class: 'r' }, money(p.asignado)), h('td'), h('td'), h('td')))))
+        h('tfoot', {}, h('tr', {}, h('td', { colspan: 2 }, 'Presupuestado (lo que falta por gastar)'), h('td', { class: 'r' }, money(p.asignado)), h('td')))))
       : h('div', { class: 'muted' }, `No hay compromisos pendientes en ${mesN}. Agrégalos en la pestaña Compromisos.`),
+    p.deMas >= 0
+      ? h('div', { class: 'callout' }, h('b', { class: 'num' }, `Tienes ${money(p.deMas)} de más`), ' por si algún compromiso necesita más dinero. Si uno se pasa, lo anotas cuando pongas su gasto real y sale de ahí.')
+      : h('div', { class: 'callout' }, h('span', { class: 'status crit' }, `▲ Te faltan ${money(-p.deMas)}: tu hormiga y tus presupuestos pasan lo que puedes gastar.`)),
     h('div', { class: 'card-sub' }, 'Los compromisos de diciembre (aniversario, grado…) se planean con el dinero de diciembre: míralos en la pestaña Compromisos.'));
 
   // ---- Saldo día a día (el gráfico) ----

@@ -1131,6 +1131,12 @@ function planCajaInterno() {
       veces: ev.filter((e) => e.clase === 'mercado').length,
     },
     paraGastar, gustos, asignado, proximo,
+    // Lo que sobra después de tu hormiga y de TODOS los presupuestos: es lo que tienes de más por si algún compromiso necesita más dinero.
+    // (es lo mismo que "te queda para gustos"; si el cálculo por fechas da menos, se usa ese para no prometer de más)
+    deMas: (() => {
+      const sobras = comps.filter(conPres).map((c) => maximoDe(c) - rest(c));
+      return sobras.length ? Math.min(gustos, Math.min(...sobras) + 999) : gustos;
+    })(),
     compromisos: comps.map((c) => ({ c, presupuesto: conPres(c) ? c.presupuesto : 0, restante: conPres(c) ? rest(c) : null, maximo: maximoDe(c), saldoAntes: antes[c.id] })),
     minimo, finMes, sigNombre,
   };
