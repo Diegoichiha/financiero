@@ -72,6 +72,8 @@ export function renderGuia(root) {
       h('li', {}, 'En Ajustes puedes exportar una copia de tus datos cuando quieras.'),
       h('li', {}, 'Si compras con la tarjeta algo que pagan entre varias personas, en Créditos → "Agregar compra" indica entre cuántas se divide: la app deja tu parte y crea sola el reembolso que esperas.'),
       h('li', {}, 'Lo que pagas con una cuenta baja el saldo de esa cuenta y, con él, lo que puedes gastar. Si hoy ya pagaste el domicilio o el parqueadero de tu rutina, esa vez de hoy deja de esperarse: no se cuenta dos veces.'),
+      h('li', {}, 'Cuando pasa un compromiso, pulsa "Ajustar gasto real" y escribe lo que realmente se gastó: lo que falta por registrar sale de la cuenta que elijas y el plan se ajusta.'),
+      h('li', {}, 'Si en una compra (por ejemplo el mercado) venían cosas de un compromiso, usa "Atribuir parte de una compra" en ese compromiso: esa parte se cuenta al compromiso sin descontar de la cuenta otra vez.'),
       h('li', {}, 'Todo gasto pagado se descuenta solo de la cuenta que elegiste (si no eliges, de tu cuenta de siempre). Solo el efectivo y la tarjeta de crédito no descuentan de una cuenta.')));
 
   const cCuenta = h('section', { class: 'card w3' },

@@ -4,14 +4,14 @@ import {
   h, money, uid, todayISO, dayShort, monthName, pct,
 } from './util.js';
 import {
-  state, hooks, planCaja, saveCuentaDinero, delCuentaDinero, setPlanConfig, saveCompromiso, compromisoGastado, saveRutina, delRutina, setPlanMaximo,
+  state, hooks, planCaja, saveCuentaDinero, delCuentaDinero, setPlanConfig, saveCompromiso, compromisoGastado, compromisosPorAjustar, atribuido, netoCompra, saveRutina, delRutina, setPlanMaximo,
 } from './store.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
 import { card, lineaSaldo } from './charts.js';
 import { movForm, ingresoForm } from './view-lists.js';
 import { pagarMov, avisoCuenta, movimientoHoy } from './cuentas-enlace.js';
 import { addIngreso, addMov, recordarCuenta } from './store.js';
-import { TIPOS_COMPROMISO } from './view-compromisos.js';
+import { TIPOS_COMPROMISO, abrirGastoReal } from './view-compromisos.js';
 
 const CLASES = {
   ingreso: 'Ingreso', fijo: 'Pago recurrente', mercado: 'Mercado', compromiso: 'Compromiso',
@@ -234,8 +234,9 @@ export function renderPlan(root) {
       h('i', { style: { width: ratioM * 100 + '%' } })) : null,
     h('div', { class: 'card-sub num' }, M.presupuesto > 0 ? `Llevas ${pct(ratioM)} del presupuesto de mercado.` : 'Define un presupuesto o agrega el historial de mercado para estimar lo que falta.'),
     M.compras.length ? h('div', {}, M.compras.map((m) => h('div', { class: 'list-item' },
-      h('div', {}, h('div', { class: 'name' }, m.concepto), h('div', { class: 'meta' }, dayShort(m.fecha) + (m.medio ? ' · ' + m.medio : ''))),
-      h('span', { class: 'amt num' }, money(m.monto))))) : null,
+      h('div', {}, h('div', { class: 'name' }, m.concepto),
+        h('div', { class: 'meta' }, dayShort(m.fecha) + (m.medio ? ' · ' + m.medio : '') + (atribuido(m) > 0 ? ` · ${money(atribuido(m))} fueron de un compromiso` : ''))),
+      h('span', { class: 'amt num' }, money(netoCompra(m)))))) : null,
     M.falta === 0 && M.presupuesto > 0 ? h('div', { class: 'card-sub' }, 'Si compras más, ese gasto sale de lo que te queda para gustos.') : null);
 
   // ---- El mes en orden de fechas: cada ingreso, pago y compromiso, por quincena ----
@@ -328,11 +329,18 @@ export function renderPlan(root) {
           ? h('button', { class: 'btn sm', title: 'Poner como presupuesto lo máximo que puedes gastar', onclick: () => { saveCompromiso({ ...c, presupuesto: gastado + x.maximo }); toast('Presupuesto: ' + money(gastado + x.maximo)); hooks.rerender(); } }, 'Usar el máximo')
           : h('span', { class: 'muted' }, 'No hay para este'))));
   };
+  const porAjustar = compromisosPorAjustar();
   const cComp = h('section', { class: 'card w6' },
     h('div', { class: 'card-head' }, h('div', {},
       h('div', { class: 'card-title' }, `¿Cuánto presupuesto en cada compromiso de ${mesN}?`),
       h('div', { class: 'card-sub' }, 'Tú decides cuánto poner en cada uno y lo puedes cambiar cuando quieras. "Máximo" es lo más que podrías gastar en ese compromiso sin dañar tus pagos, tu colchón ni los presupuestos de los demás, contando tu hormiga y rutinas habituales.')),
     h('button', { class: 'btn', onclick: () => hooks.goTab('compromisos') }, 'Ver todos los compromisos')),
+    porAjustar.length ? h('div', { class: 'callout' },
+      h('b', {}, porAjustar.length === 1 ? 'Ya pasó un compromiso: ¿cuánto se gastó de verdad?' : 'Ya pasaron compromisos: ¿cuánto se gastó de verdad?'),
+      h('div', { class: 'card-sub' }, 'Escribe lo real y se descuenta de la cuenta que elijas; así el plan y tus saldos quedan al día.'),
+      porAjustar.map((c) => h('div', { class: 'list-item' },
+        h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, `${dayShort(c.fecha)} · registrado ${money(compromisoGastado(c.id))}${c.presupuesto > 0 ? ' · presupuesto ' + money(c.presupuesto) : ''}`)),
+        h('button', { class: 'btn sm', onclick: () => abrirGastoReal(c) }, 'Ajustar gasto real')))) : null,
     p.compromisos.length
       ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
         h('thead', {}, h('tr', {}, h('th', {}, 'Compromiso'), h('th', {}, 'Fecha'), h('th', { class: 'r' }, 'Tu presupuesto'), h('th', { class: 'r' }, 'Ya gastado'), h('th', { class: 'r' }, 'Máximo que puedes gastar'), h('th'))),

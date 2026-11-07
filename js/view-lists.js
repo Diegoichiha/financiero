@@ -194,6 +194,11 @@ export function movForm(ini) {
   fCentro.addEventListener('change', () => tocado.add('centro'));
   const fNota = h('input', { type: 'text', value: ini.nota || '', placeholder: 'Opcional' });
   const fComp = select([{ value: '', label: '— Ninguno —' }, ...[...state.data.compromisos].sort((a, b) => a.fecha.localeCompare(b.fecha)).map((c) => ({ value: c.id, label: c.nombre }))], ini.compromisoId || '');
+  // Si solo UNA PARTE de la compra fue para el compromiso (ej. unos manjares del mercado para un parche), se dice cuánto: esa parte se
+  // cuenta al compromiso sin volver a descontar de ninguna cuenta. Vacío = toda la compra es del compromiso.
+  const atrib0 = (ini.atribuciones || [])[0];
+  if (atrib0) fComp.value = atrib0.compromisoId;
+  const fParte = moneyInput(atrib0 ? atrib0.monto : 0);
   const fEstado = select([{ value: 'pagado', label: 'Pagado' }, { value: 'pendiente', label: 'Pendiente' }], ini.estado || 'pagado');
   const catWrap = h('div', {}, fCat);
   const seg = h('div', { class: 'seg small', role: 'group', 'aria-label': 'Tipo de gasto' });
@@ -237,6 +242,7 @@ export function movForm(ini) {
     field('Medio de pago', fMedio),
     state.data.cuentasDinero.length ? field('Pagado desde (se descuenta de "Tengo hoy")', fCuenta, 'wide') : null,
     state.data.compromisos.length ? field('Compromiso (paseo, cumpleaños…)', fComp) : null,
+    state.data.compromisos.length ? field('Si solo una parte fue para el compromiso, ¿cuánto? (no se descuenta otra vez; vacío = todo)', fParte, 'wide') : null,
     ini.id ? field('Estado', fEstado) : null,
     field('Nota', fNota, 'wide full'),
   ];
@@ -245,6 +251,9 @@ export function movForm(ini) {
     if (!fMonto.getValue()) return 'Escribe el monto.';
     if (!fFecha.value) return 'Elige la fecha.';
     const estado = ini.id ? fEstado.value : 'pagado';
+    const parte = fComp.value ? fParte.getValue() : 0;
+    if (parte > fMonto.getValue()) return 'La parte para el compromiso no puede ser mayor que el valor del gasto.';
+    const soloParte = parte > 0 && parte < fMonto.getValue();
     // Nuevo y sin tocar la hora: la de este momento (si es de hoy). Al pasar un pendiente a pagado también se pone la de ahora.
     let hora = fHora.value;
     if (estado === 'pendiente') hora = '';
@@ -252,7 +261,8 @@ export function movForm(ini) {
     else if (!ini.id && !horaTocada) hora = fFecha.value === todayISO() ? nowHHMM() : '';
     return {
       fecha: fFecha.value, hora, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo, categoria: fCat.value,
-      centro: fCentro.value, medio: fMedio.value, nota: fNota.value.trim(), compromisoId: fComp.value || undefined, cuentaId: fCuenta.value || undefined,
+      centro: fCentro.value, medio: fMedio.value, nota: fNota.value.trim(), compromisoId: fComp.value && !soloParte ? fComp.value : undefined, atribuciones: soloParte ? [{ compromisoId: fComp.value, monto: parte }] : undefined,
+      cuentaId: fCuenta.value || undefined,
       yaEnSaldo: fCuenta.value ? undefined : ini.yaEnSaldo,
       ...(ini.id ? { estado } : {}),
     };
@@ -324,7 +334,8 @@ export function renderMovimientos(root) {
       h('button', { class: 'chip', 'aria-pressed': String(filtros.soloPend), onclick: () => { filtros.soloPend = !filtros.soloPend; pintar(); } }, 'Solo pendientes'));
     const fila = (m) => h('tr', {},
       h('td', { class: 'num' }, dayShort(m.fecha), m.estado !== 'pendiente' && m.hora ? h('div', { class: 'card-sub num' }, m.hora) : null),
-      h('td', {}, m.concepto, m.compromisoId ? h('div', { class: 'card-sub' }, '↳ ' + (state.data.compromisos.find((c) => c.id === m.compromisoId)?.nombre || 'Compromiso')) : null, m.nota ? h('div', { class: 'card-sub' }, m.nota) : null),
+      h('td', {}, m.concepto, m.compromisoId ? h('div', { class: 'card-sub' }, '↳ ' + (state.data.compromisos.find((c) => c.id === m.compromisoId)?.nombre || 'Compromiso')) : null,
+        ...(m.atribuciones || []).map((a) => h('div', { class: 'card-sub' }, `↳ ${money(a.monto)} fueron para «${state.data.compromisos.find((c) => c.id === a.compromisoId)?.nombre || 'un compromiso'}»`)), m.nota ? h('div', { class: 'card-sub' }, m.nota) : null),
       h('td', {}, categoria(m.categoria)?.nombre || m.categoria),
       h('td', {}, tipoDot(m.tipo)),
       h('td', {}, centroNombre(m.centro)),
