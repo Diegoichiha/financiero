@@ -337,10 +337,10 @@ export function renderPlan(root) {
     h('button', { class: 'btn', onclick: () => hooks.goTab('compromisos') }, 'Ver todos los compromisos')),
     porAjustar.length ? h('div', { class: 'callout' },
       h('b', {}, porAjustar.length === 1 ? 'Ya pasó un compromiso: ¿cuánto se gastó de verdad?' : 'Ya pasaron compromisos: ¿cuánto se gastó de verdad?'),
-      h('div', { class: 'card-sub' }, 'Escribe lo real y se descuenta de la cuenta que elijas; así el plan y tus saldos quedan al día.'),
+      h('div', { class: 'card-sub' }, 'Escribe lo real: lo que no estaba pagado en otra compra sale de la cuenta que elijas, y el plan y tus saldos quedan al día.'),
       porAjustar.map((c) => h('div', { class: 'list-item' },
         h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, `${dayShort(c.fecha)} · registrado ${money(compromisoGastado(c.id))}${c.presupuesto > 0 ? ' · presupuesto ' + money(c.presupuesto) : ''}`)),
-        h('button', { class: 'btn sm', onclick: () => abrirGastoReal(c) }, 'Ajustar gasto real')))) : null,
+        h('button', { class: 'btn sm', onclick: () => abrirGastoReal(c) }, 'Poner gasto real')))) : null,
     p.compromisos.length
       ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
         h('thead', {}, h('tr', {}, h('th', {}, 'Compromiso'), h('th', {}, 'Fecha'), h('th', { class: 'r' }, 'Tu presupuesto'), h('th', { class: 'r' }, 'Ya gastado'), h('th', { class: 'r' }, 'Máximo que puedes gastar'), h('th'))),

@@ -562,4 +562,7 @@ button.cta[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0
 .cta .sb { font-size: 12px; color: var(--muted); }
 .cta.total .nm, .cta.total .sb { color: var(--res-ink); opacity: 0.82; }
 
-.list-item.tachado .name, .list-item.tachado .amt { text-decoration: line-through; color: var(--muted); }
+
+.atrib-fila { display: grid; grid-template-columns: minmax(0, 1fr) 130px auto; gap: 8px; align-items: center; margin: 8px 0; }
+.atrib-fila select { min-width: 0; }
+@media (max-width: 560px) { .atrib-fila { grid-template-columns: minmax(0, 1fr) auto; } .atrib-fila select { grid-column: 1 / -1; } }

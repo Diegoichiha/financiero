@@ -36,7 +36,7 @@ export function extracto(t, corte) {
   const totalCuotas = suma(cuotas, (x) => x.plan.cuota);
   return {
     corte, pago: pagoDeCorte(corte, t), compras, cuotas, totalCompras, totalCuotas, total: totalCompras + totalCuotas,
-    comprasMercado: suma(compras.filter((c) => c.categoria === 'mercado'), (c) => c.monto),
+    comprasMercado: suma(compras.filter((c) => c.categoria === 'mercado'), (c) => c.monto - suma(c.atribuciones || [], (a) => a.monto)),
   };
 }
 export const extractoPagadoEn = (t, ymPago) => extracto(t, corteDelPago(ymPago, t));

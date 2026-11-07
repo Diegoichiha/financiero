@@ -157,7 +157,8 @@ export function renderCreditos(root) {
     const filaCompra = (c) => h('div', { class: 'list-item' },
       h('div', {}, h('div', { class: 'name' }, c.concepto),
         h('div', { class: 'meta' }, c.fecha ? fechaCorta(c.fecha) : 'sin fecha', '·', categoria(c.categoria)?.nombre || c.categoria,
-          c.partes > 1 ? ` · compartida entre ${c.partes}: tu parte ${money(c.monto / c.partes)}` : null)),
+          c.partes > 1 ? ` · compartida entre ${c.partes}: tu parte ${money(c.monto / c.partes)}` : null,
+          ...(c.atribuciones || []).map((a) => ` · ${money(a.monto)} fueron para «${state.data.compromisos.find((x) => x.id === a.compromisoId)?.nombre || 'un compromiso'}»`))),
       h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } }, h('span', { class: 'amt num' }, money(c.monto)),
         h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + c.concepto, onclick: () => modalCompra(t, c) }, '✎')));
     const filaCuota = (x) => h('div', { class: 'list-item' },

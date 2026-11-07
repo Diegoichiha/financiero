@@ -774,75 +774,84 @@ export function sincronizarAutomaticos() {
 }
 
 // ---------- Compromisos importantes (paseos, cumpleaños, grados…) ----------
-export const compromisoGastado = (id) => sum(state.data.movimientos, (m) => (m.compromisoId === id ? m.monto : sum((m.atribuciones || []).filter((a) => a.compromisoId === id), (a) => a.monto)));
-// Todo lo que se contó a un compromiso, con su compra de origen: [{ m, monto, parcial }]
+// Una compra (un gasto ya pagado o una compra de la tarjeta de crédito) puede traer cosas de un compromiso: esa parte se "atribuye" al compromiso.
+// NO vuelve a descontar de ninguna cuenta (la compra ya salió completa); solo cambia a qué se le cuenta. Cada compra se identifica con una
+// referencia: "m:<id del gasto>" o "t:<id de la tarjeta>:<id de la compra>".
+export function todasLasCompras() {
+  const D = state.data;
+  return [
+    ...D.movimientos.map((obj) => ({ ref: 'm:' + obj.id, obj, tarjeta: null })),
+    ...D.tarjetas.flatMap((t) => (t.compras || []).map((obj) => ({ ref: `t:${t.id}:${obj.id}`, obj, tarjeta: t }))),
+  ];
+}
+export const buscarCompra = (ref) => todasLasCompras().find((x) => x.ref === ref) || null;
+
+export const compromisoGastado = (id) => sum(todasLasCompras(), ({ ref, obj }) => (ref[0] === 'm' && obj.compromisoId === id ? obj.monto : sum((obj.atribuciones || []).filter((a) => a.compromisoId === id), (a) => a.monto)));
+// Todo lo que se contó a un compromiso, con su compra de origen: [{ m, ref, tarjeta, monto, parcial }]
 export function gastosDeCompromiso(id) {
   const out = [];
-  for (const m of state.data.movimientos) {
-    if (m.compromisoId === id) out.push({ m, monto: m.monto, parcial: false });
-    else for (const a of m.atribuciones || []) if (a.compromisoId === id) out.push({ m, monto: a.monto, parcial: true });
+  for (const { ref, obj, tarjeta } of todasLasCompras()) {
+    if (ref[0] === 'm' && obj.compromisoId === id) out.push({ m: obj, ref, tarjeta, monto: obj.monto, parcial: false });
+    else for (const a of obj.atribuciones || []) if (a.compromisoId === id) out.push({ m: obj, ref, tarjeta, monto: a.monto, parcial: true });
   }
-  return out.sort((a, b) => ordenPago(a.m, b.m));
+  return out.sort((a, b) => marcaPago(b.m).localeCompare(marcaPago(a.m)));
 }
-// Lo que se aparta de un mes por un compromiso: su presupuesto (o lo gastado si ya se pasó); una vez ajustado al gasto real, vale ese gasto.
-export const reservadoDe = (c) => (c.cerrado ? compromisoGastado(c.id) : Math.max(c.presupuesto, compromisoGastado(c.id)));
-// Compromisos que ya pasaron y todavía no se ajustaron a lo que se gastó de verdad (los de los últimos 45 días).
+// Una vez puesto el gasto real, el compromiso aparta lo real (no el presupuesto); antes, el presupuesto o lo gastado si ya se pasó.
+export const tieneGastoReal = (c) => c.gastoReal != null || !!c.cerrado;
+export const reservadoDe = (c) => (tieneGastoReal(c) ? compromisoGastado(c.id) : Math.max(c.presupuesto, compromisoGastado(c.id)));
+// Compromisos que ya pasaron y todavía no tienen su gasto real (los de los últimos 45 días).
 export function compromisosPorAjustar() {
   const hoy = todayISO();
   const desde = addDays(hoy, -45);
-  return state.data.compromisos.filter((c) => !c.cerrado && !c.fechaAprox && (c.fechaFin || c.fecha) < hoy && c.fecha >= desde).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return state.data.compromisos.filter((c) => !tieneGastoReal(c) && !c.fechaAprox && (c.fechaFin || c.fecha) < hoy && c.fecha >= desde).sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
-// El gasto "de relleno" que crea "Ajustar gasto real" (o el que creó la primera versión, que terminaba en "(gasto real)"): al volver a ajustar se
+// El gasto "de relleno" que crea "Gasto real" (o el que creó la primera versión, que terminaba en "(gasto real)"): al guardar de nuevo se
 // reemplaza por el nuevo cálculo, devolviendo su plata a la cuenta de donde salió.
 export const esAjusteReal = (m) => !!m.compromisoId && (m.ajuste || / \(gasto real\)$/.test(m.concepto));
 export const ajustesDeCompromiso = (id) => state.data.movimientos.filter((m) => m.compromisoId === id && esAjusteReal(m));
-// Lo registrado de verdad en un compromiso, sin contar el ajuste que se va a reemplazar.
-export const gastadoSinAjuste = (id) => compromisoGastado(id) - sum(ajustesDeCompromiso(id));
+// Lo registrado directamente al compromiso (con "+ Gasto"), sin el ajuste que se reemplaza.
+export const gastoPropio = (id) => sum(state.data.movimientos.filter((m) => m.compromisoId === id && !esAjusteReal(m)));
 
-// Ajusta un compromiso a lo que REALMENTE se gastó. Lo que falta por registrar se cubre de una de estas formas:
-//   · `cuentaId`: sale de esa cuenta (mueve su saldo);
-//   · `compraId`: ya estaba pagado dentro de una compra hecha (se atribuye a ella: NO se descuenta de ninguna cuenta);
-//   · ninguna: efectivo o ya estaba en tu saldo (se registra sin descontar de ninguna cuenta).
-// Lo ya registrado nunca se descuenta otra vez, y volver a ajustar reemplaza el ajuste anterior. Queda "cerrado": desde ahí cuenta lo real.
-export function ajustarGastoReal(id, real, { cuentaId = '', categoria = 'otros-var', compraId = '' } = {}) {
+function quitarAtribuciones(compromisoId) {
+  for (const { obj } of todasLasCompras()) {
+    if (!obj.atribuciones) continue;
+    obj.atribuciones = obj.atribuciones.filter((a) => a.compromisoId !== compromisoId);
+    if (!obj.atribuciones.length) delete obj.atribuciones;
+  }
+}
+
+// Gasto real de un compromiso, editable cuando quieras. `real` es el total; `partes` = [{ ref, monto }] lo que de ese total ya estaba pagado dentro
+// de compras o de la tarjeta (se atribuye: NO se descuenta de ninguna cuenta). Lo que sobra (real − gastos propios − partes) sale de `cuentaId`
+// (mueve su saldo) o, sin cuenta, se registra sin descontar. Lo anterior se reemplaza: ajuste viejo (con su plata devuelta) y atribuciones viejas.
+export function guardarGastoReal(id, { real, partes = [], cuentaId = '', categoria = 'otros-var' }) {
   const c = state.data.compromisos.find((x) => x.id === id);
   if (!c) return null;
-  for (const m of ajustesDeCompromiso(id)) delMov(m.id); // devuelve a su cuenta lo que ese ajuste había descontado
-  const dif = Math.round(real - compromisoGastado(id));
-  const out = { mov: null, compra: null, dif };
-  if (dif > 0) {
-    const compra = compraId && state.data.movimientos.find((x) => x.id === compraId);
-    if (compra) {
-      const previa = (compra.atribuciones || []).find((a) => a.compromisoId === id)?.monto || 0;
-      atribuirCompra(compra.id, id, previa + dif);
-      out.compra = compra;
-    } else {
-      const hoy = todayISO();
-      out.mov = addMov({
-        fecha: (c.fechaFin || c.fecha) <= hoy ? (c.fechaFin || c.fecha) : hoy, hora: '', concepto: c.nombre + ' (gasto real)', monto: dif, tipo: 'variable', categoria,
-        centro: 'hogar', medio: '', compromisoId: id, ajuste: true, cuentaId: cuentaId || undefined, yaEnSaldo: cuentaId ? undefined : true,
-      });
-    }
+  for (const m of ajustesDeCompromiso(id)) delMov(m.id);
+  quitarAtribuciones(id);
+  const por = new Map();
+  for (const p of partes) por.set(p.ref, (por.get(p.ref) || 0) + (Math.round(p.monto) || 0));
+  let atribuidoTotal = 0;
+  for (const [ref, monto] of por) {
+    const compra = buscarCompra(ref);
+    if (!compra) continue;
+    const valor = Math.min(monto, Math.max(0, compra.obj.monto - atribuido(compra.obj)));
+    if (valor <= 0) continue;
+    compra.obj.atribuciones = [...(compra.obj.atribuciones || []), { compromisoId: id, monto: valor }];
+    atribuidoTotal += valor;
   }
-  c.cerrado = true;
+  const resto = Math.round(real - gastoPropio(id) - atribuidoTotal);
+  let mov = null;
+  if (resto > 0) {
+    const hoy = todayISO();
+    mov = addMov({
+      fecha: (c.fechaFin || c.fecha) <= hoy ? (c.fechaFin || c.fecha) : hoy, hora: '', concepto: c.nombre + ' (gasto real)', monto: resto, tipo: 'variable', categoria,
+      centro: 'hogar', medio: '', compromisoId: id, ajuste: true, cuentaId: cuentaId || undefined, yaEnSaldo: cuentaId ? undefined : true,
+    });
+  }
   c.gastoReal = Math.round(real);
+  delete c.cerrado;
   save();
-  return out;
-}
-export function reabrirCompromiso(id) {
-  const c = state.data.compromisos.find((x) => x.id === id);
-  if (c) { delete c.cerrado; delete c.gastoReal; save(); }
-}
-// Atribuye `monto` de una compra ya pagada a un compromiso (monto 0 = quitar). No toca ninguna cuenta.
-export function atribuirCompra(movId, compromisoId, monto) {
-  const m = state.data.movimientos.find((x) => x.id === movId);
-  if (!m) return;
-  const otras = (m.atribuciones || []).filter((a) => a.compromisoId !== compromisoId);
-  const tope = Math.max(0, m.monto - sum(otras, (a) => a.monto));
-  const valor = Math.min(Math.round(monto) || 0, tope);
-  const lista = valor > 0 ? [...otras, { compromisoId, monto: valor }] : otras;
-  if (lista.length) m.atribuciones = lista; else delete m.atribuciones;
-  save();
+  return { mov, resto, atribuido: atribuidoTotal };
 }
 export function saveCompromiso(c) {
   const list = state.data.compromisos;
@@ -852,10 +861,8 @@ export function saveCompromiso(c) {
 }
 export function delCompromiso(id) {
   state.data.compromisos = state.data.compromisos.filter((c) => c.id !== id);
-  for (const m of state.data.movimientos) {
-    if (m.compromisoId === id) delete m.compromisoId;
-    if (m.atribuciones) { m.atribuciones = m.atribuciones.filter((a) => a.compromisoId !== id); if (!m.atribuciones.length) delete m.atribuciones; }
-  }
+  for (const m of state.data.movimientos) if (m.compromisoId === id) delete m.compromisoId;
+  quitarAtribuciones(id);
   save();
 }
 // Lo que se aparta en el mes del evento: el presupuesto, o lo gastado si ya se pasó.

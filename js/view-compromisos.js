@@ -5,8 +5,7 @@ import {
 } from './util.js';
 import {
   state, hooks, cuentaSugerida, recordarCuenta, saveCompromiso, delCompromiso, compromisoGastado, margenMes, addMov, sum, categoria, planCaja,
-  gastosDeCompromiso, ajustarGastoReal, reabrirCompromiso, atribuirCompra, atribuido, ordenPago, reservadoDe, cuentaDinero,
-  esAjusteReal, ajustesDeCompromiso, gastadoSinAjuste,
+  gastosDeCompromiso, guardarGastoReal, todasLasCompras, atribuido, reservadoDe, cuentaDinero, ajustesDeCompromiso, gastoPropio, marcaPago, tieneGastoReal,
 } from './store.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
 
@@ -76,122 +75,104 @@ function modalGasto(c) {
   });
 }
 
-// Compras ya pagadas a las que se les puede atribuir algo de un compromiso (lo más reciente primero; la preferida es el mercado cercano a su fecha).
+const parteDe = (obj, id) => (obj.atribuciones || []).find((a) => a.compromisoId === id)?.monto || 0;
+// Lo que todavía se le puede atribuir a este compromiso de una compra (lo que no se haya atribuido a otro).
+const disponibleDe = (obj, id) => obj.monto - (atribuido(obj) - parteDe(obj, id));
+// Las compras de la tarjeta traídas del historial pueden no tener fecha: se muestra su corte.
+const fechaTxt = (o) => (o.fecha ? dayShort(o.fecha) : o.corte ? 'corte ' + dayShort(o.corte) : 'sin fecha');
+const etiquetaCompra = ({ obj, tarjeta }) => `${tarjeta ? 'Tarjeta ' + tarjeta.nombre + ': ' : ''}${obj.concepto} · ${money(obj.monto)} · ${fechaTxt(obj)}${obj.hora ? ' ' + obj.hora : ''}`;
+
+// Compras a las que se les puede atribuir algo: gastos ya pagados y compras de la tarjeta (las más recientes, más las que ya tienen algo de este compromiso).
 function comprasParaAtribuir(c) {
-  const lista = state.data.movimientos.filter((m) => m.estado === 'pagado' && !m.compromisoId && m.tipo !== 'recurrente' && m.monto > 0).sort(ordenPago).slice(0, 40);
-  const cerca = (m) => Math.abs(daysBetween(m.fecha, c.fecha)) <= 3;
-  const preferida = lista.find((m) => m.categoria === 'mercado' && cerca(m)) || lista.find((m) => m.categoria === 'mercado') || lista[0] || null;
+  const sirve = ({ ref, obj }) => obj.monto > 0 && !obj.demo && (ref[0] === 't' || (obj.estado === 'pagado' && !obj.compromisoId && obj.tipo !== 'recurrente'));
+  const todas = todasLasCompras().filter(sirve).sort((a, b) => marcaPago(b.obj).localeCompare(marcaPago(a.obj)));
+  const lista = todas.filter((x, i) => i < 60 || parteDe(x.obj, c.id) > 0);
+  const cerca = ({ obj }) => !!obj.fecha && Math.abs(daysBetween(obj.fecha, c.fecha)) <= 3;
+  const preferida = lista.find((x) => x.obj.categoria === 'mercado' && cerca(x)) || lista.find((x) => x.obj.categoria === 'mercado') || lista[0] || null;
   return { lista, preferida };
 }
-const parteDe = (m, id) => (m.atribuciones || []).find((a) => a.compromisoId === id)?.monto || 0;
-const etiquetaCompra = (m) => `${m.concepto} · ${money(m.monto)} · ${dayShort(m.fecha)}${m.hora ? ' ' + m.hora : ''}${atribuido(m) ? ` (ya atribuido ${money(atribuido(m))})` : ''}`;
 
-// Cuando el compromiso pasa: se escribe lo que REALMENTE se gastó (el total). Lo que falta por registrar sale de una cuenta, o —si no eliges
-// cuenta— se atribuye ahí mismo a una compra que ya hiciste (no se descuenta de nada). Volver a ajustar reemplaza el ajuste anterior.
+// Gasto real de un compromiso: su presupuesto arriba, el gasto real (el que quieras) y, si ya estaba pagado dentro de una compra o de la tarjeta,
+// se atribuye el total o una parte a ella (no se descuenta otra vez). Lo que no esté en ninguna compra sale de la cuenta que elijas.
 export function abrirGastoReal(c) {
-  const base = gastadoSinAjuste(c.id); // lo registrado de verdad (sin el ajuste anterior, que se reemplaza)
-  const previos = ajustesDeCompromiso(c.id);
-  const { lista: compras, preferida } = comprasParaAtribuir(c);
-  const fReal = moneyInput(c.cerrado && c.gastoReal != null ? c.gastoReal : base);
+  const propio = gastoPropio(c.id); // gastos puestos directamente al compromiso con "+ Gasto"
+  const ajustes = ajustesDeCompromiso(c.id);
+  const { lista, preferida } = comprasParaAtribuir(c);
   const cuentas = state.data.cuentasDinero;
-  const fCuenta = select([...cuentas.map((x) => ({ value: x.id, label: `${x.nombre} · hoy ${money(x.saldo)}` })), { value: '', label: 'Ninguna: no sale de ninguna cuenta ahora' }], cuentas.length ? cuentaSugerida('gasto', '') : '');
-  const fCompra = select([{ value: '', label: 'Fue en efectivo o ya estaba en mi saldo' }, ...compras.map((m) => ({ value: m.id, label: etiquetaCompra(m) }))], preferida ? preferida.id : '');
-  const fCat = select(state.data.categorias.filter((x) => x.tipo !== 'recurrente').map((x) => ({ value: x.id, label: x.nombre })), 'otros-var');
+  const fReal = moneyInput(c.gastoReal != null ? c.gastoReal : compromisoGastado(c.id));
+  const cuentaInicial = ajustes.length ? (ajustes.find((x) => x.cuentaId)?.cuentaId || '') : (cuentas.length ? cuentaSugerida('gasto', '') : '');
+  const fCuenta = select([...cuentas.map((x) => ({ value: x.id, label: `${x.nombre} · hoy ${money(x.saldo)}` })), { value: '', label: 'Ninguna: efectivo o ya estaba en mi saldo' }], cuentaInicial);
+  const presu = h('div', { class: 'card-sub full' });
+  const filasHost = h('div', { class: 'full' });
+  const restoTit = h('span', {});
+  const restoBox = h('label', { class: 'f full' }, restoTit, fCuenta);
   const info = h('div', { class: 'card-sub full', 'aria-live': 'polite' });
-  const compraSel = () => compras.find((m) => m.id === fCompra.value);
-  const disponible = (m) => m.monto - (atribuido(m) - parteDe(m, c.id));
-  const bloqueCompra = field('¿En qué compra ya estaba pagado?', fCompra, 'full');
-  const bloqueCat = field('Categoría de lo que falta', fCat, 'full');
+  const filas = [];
+  const suma = () => filas.reduce((a, f) => a + f.monto.getValue(), 0);
+  const restoActual = () => Math.round(fReal.getValue() - propio - suma());
   const pintar = () => {
-    const dif = Math.round(fReal.getValue() - base);
+    const real = fReal.getValue();
+    const partes = suma();
+    const resto = restoActual();
+    const dif = c.presupuesto - real;
+    presu.textContent = c.presupuesto > 0 ? `Presupuesto ${money(c.presupuesto)} · ${dif >= 0 ? `te quedan ${money(dif)}` : `te pasaste por ${money(-dif)}`}` : 'Sin presupuesto';
+    restoBox.style.display = resto > 0 && cuentas.length ? '' : 'none';
+    restoTit.textContent = `El resto (${money(resto)}) sale de`;
     const cu = cuentaDinero(fCuenta.value);
-    const m = compraSel();
-    const sinCuenta = !fCuenta.value;
-    bloqueCompra.style.display = dif > 0 && sinCuenta ? '' : 'none';
-    bloqueCat.style.display = dif > 0 && !(sinCuenta && m) ? '' : 'none';
-    const reemplazo = previos.length ? ` Se reemplaza el ajuste anterior de ${money(sum(previos))}${previos.some((x) => x.cuentaId) ? ' (se devuelve a su cuenta)' : ''}.` : '';
-    if (dif < 0) info.textContent = `Lo registrado de verdad es ${money(base)}, más de lo que escribiste. Quita arriba lo que no corresponda.`;
-    else if (dif === 0) info.textContent = 'Ya está todo registrado: solo queda marcado como ajustado a lo real.' + reemplazo;
-    else if (cu) info.textContent = `Ya tienes registrado ${money(base)}: se agregan ${money(dif)} que salen de ${cu.nombre} (hoy ${money(cu.saldo)} → quedará ${money(cu.saldo - dif)}).` + reemplazo;
-    else if (m) info.textContent = `Se cuentan ${money(dif)} de «${m.concepto}» a este compromiso. No se descuenta de ninguna cuenta: esa compra ya salió completa.` + (dif > disponible(m) ? ` OJO: esa compra solo tiene ${money(disponible(m))} disponibles.` : '') + reemplazo;
-    else info.textContent = `Se agregan ${money(dif)} sin descontar de ninguna cuenta (efectivo o ya estaba en tu saldo).` + reemplazo;
+    if (resto < 0) info.textContent = `Las partes suman ${money(partes + propio)}, más que el gasto real (${money(real)}). Sube el gasto real o baja una parte.`;
+    else if (resto > 0) info.textContent = cu ? `${money(resto)} salen de ${cu.nombre} (hoy ${money(cu.saldo)} → quedará ${money(cu.saldo - resto)}).` : `${money(resto)} se registran sin descontar de ninguna cuenta.`;
+    else info.textContent = partes > 0 ? 'Todo el gasto ya estaba pagado dentro de esas compras: no se descuenta de ninguna cuenta.' : '';
+  };
+  const agregarFila = (ref, monto) => {
+    const sel = select(lista.map((x) => ({ value: x.ref, label: etiquetaCompra(x) })), ref);
+    const inp = moneyInput(monto);
+    const fila = { sel, monto: inp, nodo: null };
+    const quitar = h('button', { type: 'button', class: 'btn ghost icon', 'aria-label': 'Quitar esta parte', title: 'Quitar esta parte', onclick: () => { filas.splice(filas.indexOf(fila), 1); fila.nodo.remove(); pintar(); } }, '✕');
+    fila.nodo = h('div', { class: 'atrib-fila' }, sel, inp, quitar);
+    sel.addEventListener('change', pintar);
+    inp.addEventListener('input', pintar);
+    filas.push(fila);
+    filasHost.append(fila.nodo);
+    pintar();
+  };
+  // Lo que ya se había atribuido a este compromiso aparece como filas que se pueden cambiar o quitar.
+  for (const x of lista) if (parteDe(x.obj, c.id) > 0) agregarFila(x.ref, parteDe(x.obj, c.id));
+  const nuevaParte = () => {
+    const usadas = new Set(filas.map((f) => f.sel.value));
+    const x = (preferida && !usadas.has(preferida.ref) ? preferida : lista.find((y) => !usadas.has(y.ref))) || null;
+    if (!x) { toast('No hay más compras para atribuir.'); return; }
+    agregarFila(x.ref, Math.max(0, Math.min(restoActual(), disponibleDe(x.obj, c.id))));
   };
   fReal.addEventListener('input', pintar);
-  [fCuenta, fCompra].forEach((el) => el.addEventListener('change', pintar));
+  fCuenta.addEventListener('change', pintar);
   pintar();
-  const quitarAtribucion = (m) => (ev) => {
-    const dlg = ev.currentTarget.closest('dialog');
-    dlg.close(); dlg.remove();
-    atribuirCompra(m.id, c.id, 0);
-    hooks.rerender();
-    abrirGastoReal(state.data.compromisos.find((x) => x.id === c.id));
-  };
-  const gastos = gastosDeCompromiso(c.id);
-  modal('¿Cuánto se gastó de verdad en «' + c.nombre + '»?', [
-    h('div', { class: 'card-sub full' }, `Presupuesto ${money(c.presupuesto)} · registrado ${money(base)}${previos.length ? ` (más un ajuste anterior de ${money(sum(previos))} que se reemplaza)` : ''}. Escribe el total real, lo ya registrado incluido.`),
-    gastos.length ? h('div', { class: 'full' }, gastos.map(({ m, monto, parcial }) => h('div', { class: 'list-item' + (esAjusteReal(m) ? ' tachado' : '') },
-      h('div', {}, h('div', { class: 'name' }, m.concepto), h('div', { class: 'meta' },
-        dayShort(m.fecha) + (m.cuentaId && nombreCuenta(m.cuentaId) ? ' · ' + nombreCuenta(m.cuentaId) : '') + (parcial ? ` · parte de una compra de ${money(m.monto)}` : '') + (esAjusteReal(m) ? ' · ajuste anterior: se reemplaza' : ''),
-        parcial ? h('button', { type: 'button', class: 'btn ghost sm', title: 'Quitar esta atribución (no mueve ninguna cuenta)', onclick: quitarAtribucion(m) }, 'Quitar') : null)),
-      h('span', { class: 'amt num' }, money(monto))))) : null,
-    field('Gasto real total', fReal, 'full'),
-    cuentas.length ? field('Lo que falta por registrar, ¿de qué cuenta salió?', fCuenta, 'full') : null,
-    bloqueCompra,
-    bloqueCat,
+  modal('Gasto real de «' + c.nombre + '»', [
+    presu,
+    field('Gasto real (cámbialo cuando quieras)', fReal, 'full'),
+    propio > 0 ? h('div', { class: 'card-sub full' }, `Incluye ${money(propio)} ya registrados como gasto de este compromiso (edítalos en Gastos).`) : null,
+    lista.length ? h('div', { class: 'full' },
+      h('div', { class: 'tile-label' }, '¿Ya estaba pagado dentro de una compra o de la tarjeta?'),
+      h('div', { class: 'card-sub' }, 'Atribuye el total o una parte: se cuenta a este compromiso y no se descuenta otra vez de ninguna cuenta.'),
+      filasHost,
+      h('button', { type: 'button', class: 'btn sm', onclick: nuevaParte }, '+ Atribuir a una compra o tarjeta')) : null,
+    cuentas.length ? restoBox : null,
     info,
-    h('div', { class: 'card-sub full' }, 'Si lo pagaste con la tarjeta de crédito, regístralo mejor en Créditos y aquí deja "Ninguna".'),
+    h('div', { class: 'card-sub full' }, 'Si lo pagaste con la tarjeta de crédito y aún no está en Créditos, regístralo allá y vuelve a atribuirlo aquí.'),
   ], {
-    guardar: 'Guardar gasto real',
+    guardar: 'Guardar',
     onSave: () => {
       const real = fReal.getValue();
-      const dif = Math.round(real - base);
-      if (dif < 0) return `Lo registrado de verdad (${money(base)}) supera lo que escribiste. Quita arriba lo que no corresponda.`;
-      const m = dif > 0 && !fCuenta.value ? compraSel() : null;
-      if (m && dif > disponible(m)) return `«${m.concepto}» solo tiene ${money(disponible(m))} disponibles para atribuir. Elige otra compra o una cuenta.`;
-      const r = ajustarGastoReal(c.id, real, { cuentaId: fCuenta.value, categoria: fCat.value, compraId: m ? m.id : '' });
-      if (fCuenta.value) recordarCuenta('gasto', '', fCuenta.value);
-      toast(r.mov ? (avisoCuenta('gasto', r.mov.monto, r.mov.cuentaId) || `Gasto real guardado: ${money(real)}`)
-        : r.compra ? `${money(r.dif)} de «${r.compra.concepto}» se cuentan a ${c.nombre}. No se descontó nada otra vez.` : `Ajustado: se gastó ${money(real)}`);
-      hooks.rerender();
-    },
-    peligro: c.cerrado ? { label: 'Volver a abrir', fn: () => { reabrirCompromiso(c.id); hooks.rerender(); } } : null,
-  });
-}
-
-// Una compra ya pagada trajo cosas de este compromiso (un parche, un regalo…): se dice cuánto fue. La compra ya salió completa de la cuenta,
-// así que NO se descuenta otra vez; solo sube lo gastado del compromiso y baja lo gastado en mercado.
-function modalAtribuir(c) {
-  const { lista: candidatas, preferida } = comprasParaAtribuir(c);
-  if (!candidatas.length) { toast('Todavía no hay compras pagadas para atribuir.'); return; }
-  const fCompra = select(candidatas.map((m) => ({ value: m.id, label: etiquetaCompra(m) })), preferida.id);
-  const fMonto = moneyInput(parteDe(preferida, c.id));
-  const info = h('div', { class: 'card-sub full', 'aria-live': 'polite' });
-  const actual = () => candidatas.find((m) => m.id === fCompra.value);
-  const pintar = () => {
-    const m = actual();
-    const otras = atribuido(m) - parteDe(m, c.id);
-    const tope = m.monto - otras;
-    const parte = Math.min(fMonto.getValue(), tope);
-    info.textContent = `La compra fue de ${money(m.monto)} y ya salió de ${m.cuentaId && nombreCuenta(m.cuentaId) ? nombreCuenta(m.cuentaId) : 'tus cuentas'}: no se descuenta otra vez. `
-      + (parte > 0 ? `${money(parte)} se cuentan a «${c.nombre}»${m.categoria === 'mercado' ? ` y en el mercado queda ${money(m.monto - otras - parte)}` : ''}.` : 'Escribe cuánto de esa compra fue para este compromiso.');
-  };
-  fCompra.addEventListener('change', () => { fMonto.value = parteDe(actual(), c.id) ? new Intl.NumberFormat('es-CO').format(parteDe(actual(), c.id)) : ''; pintar(); });
-  fMonto.addEventListener('input', pintar);
-  pintar();
-  modal('Atribuir parte de una compra a «' + c.nombre + '»', [
-    h('div', { class: 'card-sub full' }, 'Por ejemplo: en el mercado de ayer compraste cosas para el parche. Dices cuánto fue y ese valor se cuenta al compromiso, sin descontar de la cuenta otra vez.'),
-    field('Compra', fCompra, 'full'),
-    field('¿Cuánto de esa compra fue para este compromiso?', fMonto, 'full'),
-    info,
-  ], {
-    guardar: 'Atribuir',
-    onSave: () => {
-      const m = actual();
-      const otras = atribuido(m) - parteDe(m, c.id);
-      const valor = fMonto.getValue();
-      if (valor > m.monto - otras) return `Esa compra solo tiene ${money(m.monto - otras)} disponibles para atribuir.`;
-      atribuirCompra(m.id, c.id, valor);
-      toast(valor > 0 ? `${money(valor)} de «${m.concepto}» se cuentan a ${c.nombre}. No se descontó nada otra vez.` : 'Atribución quitada');
+      const por = new Map();
+      for (const f of filas) if (f.monto.getValue() > 0) por.set(f.sel.value, (por.get(f.sel.value) || 0) + f.monto.getValue());
+      const resto = Math.round(real - propio - [...por.values()].reduce((a, b) => a + b, 0));
+      if (resto < 0) return 'Las partes suman más que el gasto real. Sube el gasto real o baja una parte.';
+      for (const [ref, monto] of por) {
+        const x = lista.find((y) => y.ref === ref);
+        if (x && monto > disponibleDe(x.obj, c.id)) return `«${x.obj.concepto}» solo tiene ${money(disponibleDe(x.obj, c.id))} disponibles para atribuir.`;
+      }
+      const r = guardarGastoReal(c.id, { real, partes: [...por].map(([ref, monto]) => ({ ref, monto })), cuentaId: resto > 0 ? fCuenta.value : '' });
+      if (r.mov && fCuenta.value) recordarCuenta('gasto', '', fCuenta.value);
+      toast(r.mov ? (avisoCuenta('gasto', r.mov.monto, r.mov.cuentaId) || `Gasto real guardado: ${money(real)}`) : `Gasto real guardado: ${money(real)}${r.atribuido ? ' (sin descontar nada otra vez)' : ''}`);
       hooks.rerender();
     },
   });
@@ -217,7 +198,7 @@ function detalleGastos(c) {
   if (!gastos.length) return null;
   return h('details', {}, h('summary', {}, `En qué se gastó (${gastos.length})`),
     gastos.map(({ m, monto, parcial }) => h('div', { class: 'list-item' },
-      h('div', {}, h('div', { class: 'name' }, m.concepto), h('div', { class: 'meta' }, dayShort(m.fecha) + (m.cuentaId && nombreCuenta(m.cuentaId) ? ' · ' + nombreCuenta(m.cuentaId) : '') + (parcial ? ` · parte de una compra de ${money(m.monto)}` : ''))),
+      h('div', {}, h('div', { class: 'name' }, m.concepto), h('div', { class: 'meta' }, fechaTxt(m) + (m.cuentaId && nombreCuenta(m.cuentaId) ? ' · ' + nombreCuenta(m.cuentaId) : '') + (parcial ? ` · parte de una compra de ${money(m.monto)}` : ''))),
       h('span', { class: 'amt num' }, money(monto)))));
 }
 
@@ -286,11 +267,10 @@ export function renderCompromisos(root) {
       tope > 0 ? h('div', { class: 'meter ' + clase, role: 'progressbar', 'aria-valuenow': Math.round(Math.min(1, ratio) * 100), 'aria-valuemin': 0, 'aria-valuemax': 100 },
         h('i', { style: { width: Math.min(100, ratio * 100) + '%' } })) : null,
       h('div', {},
-        fila(`Gastado${tope > 0 ? ` (${pct(Math.min(ratio, 9.99))})` : ''}`, money(gastado)),
+        fila(`${tieneGastoReal(c) ? 'Gasto real' : 'Gastado'}${tope > 0 ? ` (${pct(Math.min(ratio, 9.99))})` : ''}`, money(gastado)),
         tope > 0 ? fila(restante >= 0 ? 'Te queda por gastar' : 'Te pasaste por', money(Math.abs(restante))) : null,
         fila('Apartado', money(apartado)),
         delPlan ? fila('Tendrás en cuentas ese día', money(delPlan.saldoAntes)) : null),
-      c.cerrado ? h('div', { class: 'card-sub' }, `✓ Ajustado al gasto real: ${money(c.gastoReal != null ? c.gastoReal : gastado)}`) : null,
       detalleGastos(c),
       !pasado && definido
         ? h('div', { class: 'callout' },
@@ -304,9 +284,8 @@ export function renderCompromisos(root) {
         : null,
       c.nota ? h('div', { class: 'card-sub' }, c.nota) : null,
       h('div', { class: 'row' },
-        pasado ? h('button', { class: 'btn sm primary', onclick: () => abrirGastoReal(c) }, c.cerrado ? 'Cambiar gasto real' : 'Ajustar gasto real') : null,
+        h('button', { class: 'btn sm' + (pasado && !tieneGastoReal(c) ? ' primary' : ''), onclick: () => abrirGastoReal(c) }, 'Gasto real'),
         h('button', { class: 'btn sm', onclick: () => modalGasto(c) }, '+ Gasto'),
-        h('button', { class: 'btn sm', title: 'Una compra ya pagada trajo cosas de este compromiso', onclick: () => modalAtribuir(c) }, 'Atribuir parte de una compra'),
         pasado ? null : h('button', { class: 'btn sm', onclick: () => modalApartar(c) }, '+ Apartar dinero')));
   };
 
@@ -324,7 +303,7 @@ export function renderCompromisos(root) {
           h('thead', {}, h('tr', {}, h('th', {}, 'Compromiso'), h('th', {}, 'Fecha'), h('th', { class: 'r' }, 'Presupuesto'), h('th', { class: 'r' }, 'Gastado'), h('th', {}, 'Gasto real'), h('th'))),
           h('tbody', {}, [...pasados].reverse().map((c) => h('tr', {},
             h('td', {}, `${c.nombre} · ${tipoLabel(c.tipo)}`), h('td', {}, fechaLarga(c.fecha)), h('td', { class: 'r' }, money(c.presupuesto)), h('td', { class: 'r' }, money(compromisoGastado(c.id))),
-            h('td', {}, h('button', { class: 'btn sm' + (c.cerrado ? ' ghost' : ''), onclick: () => abrirGastoReal(c) }, c.cerrado ? '✓ Ajustado' : 'Ajustar')),
+            h('td', {}, h('button', { class: 'btn sm' + (tieneGastoReal(c) ? ' ghost' : ''), onclick: () => abrirGastoReal(c) }, tieneGastoReal(c) ? money(c.gastoReal != null ? c.gastoReal : compromisoGastado(c.id)) : 'Poner')),
             h('td', {}, h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + c.nombre, onclick: () => modalCompromiso(c) }, '✎')))))))));
     }
   }
