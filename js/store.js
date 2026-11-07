@@ -792,24 +792,42 @@ export function compromisosPorAjustar() {
   const desde = addDays(hoy, -45);
   return state.data.compromisos.filter((c) => !c.cerrado && !c.fechaAprox && (c.fechaFin || c.fecha) < hoy && c.fecha >= desde).sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
-// Ajusta un compromiso a lo que REALMENTE se gastó: lo que falta por registrar se agrega como un gasto que sale de la cuenta elegida
-// (y mueve su saldo); lo ya registrado no se vuelve a descontar. Queda "cerrado": desde ahí cuenta lo real, no el presupuesto.
-export function ajustarGastoReal(id, real, { cuentaId = '', medio = '', categoria = 'otros-var' } = {}) {
+// El gasto "de relleno" que crea "Ajustar gasto real" (o el que creó la primera versión, que terminaba en "(gasto real)"): al volver a ajustar se
+// reemplaza por el nuevo cálculo, devolviendo su plata a la cuenta de donde salió.
+export const esAjusteReal = (m) => !!m.compromisoId && (m.ajuste || / \(gasto real\)$/.test(m.concepto));
+export const ajustesDeCompromiso = (id) => state.data.movimientos.filter((m) => m.compromisoId === id && esAjusteReal(m));
+// Lo registrado de verdad en un compromiso, sin contar el ajuste que se va a reemplazar.
+export const gastadoSinAjuste = (id) => compromisoGastado(id) - sum(ajustesDeCompromiso(id));
+
+// Ajusta un compromiso a lo que REALMENTE se gastó. Lo que falta por registrar se cubre de una de estas formas:
+//   · `cuentaId`: sale de esa cuenta (mueve su saldo);
+//   · `compraId`: ya estaba pagado dentro de una compra hecha (se atribuye a ella: NO se descuenta de ninguna cuenta);
+//   · ninguna: efectivo o ya estaba en tu saldo (se registra sin descontar de ninguna cuenta).
+// Lo ya registrado nunca se descuenta otra vez, y volver a ajustar reemplaza el ajuste anterior. Queda "cerrado": desde ahí cuenta lo real.
+export function ajustarGastoReal(id, real, { cuentaId = '', categoria = 'otros-var', compraId = '' } = {}) {
   const c = state.data.compromisos.find((x) => x.id === id);
   if (!c) return null;
+  for (const m of ajustesDeCompromiso(id)) delMov(m.id); // devuelve a su cuenta lo que ese ajuste había descontado
   const dif = Math.round(real - compromisoGastado(id));
-  let mov = null;
+  const out = { mov: null, compra: null, dif };
   if (dif > 0) {
-    const hoy = todayISO();
-    mov = addMov({
-      fecha: (c.fechaFin || c.fecha) <= hoy ? (c.fechaFin || c.fecha) : hoy, hora: '', concepto: c.nombre + ' (gasto real)', monto: dif, tipo: 'variable', categoria,
-      centro: 'hogar', medio, compromisoId: id, cuentaId: cuentaId || undefined, yaEnSaldo: cuentaId ? undefined : true,
-    });
+    const compra = compraId && state.data.movimientos.find((x) => x.id === compraId);
+    if (compra) {
+      const previa = (compra.atribuciones || []).find((a) => a.compromisoId === id)?.monto || 0;
+      atribuirCompra(compra.id, id, previa + dif);
+      out.compra = compra;
+    } else {
+      const hoy = todayISO();
+      out.mov = addMov({
+        fecha: (c.fechaFin || c.fecha) <= hoy ? (c.fechaFin || c.fecha) : hoy, hora: '', concepto: c.nombre + ' (gasto real)', monto: dif, tipo: 'variable', categoria,
+        centro: 'hogar', medio: '', compromisoId: id, ajuste: true, cuentaId: cuentaId || undefined, yaEnSaldo: cuentaId ? undefined : true,
+      });
+    }
   }
   c.cerrado = true;
   c.gastoReal = Math.round(real);
   save();
-  return mov;
+  return out;
 }
 export function reabrirCompromiso(id) {
   const c = state.data.compromisos.find((x) => x.id === id);
