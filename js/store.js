@@ -230,6 +230,12 @@ function migrate(d) {
     d.config.migraciones.push('auto-ingresos-2026-11');
     cambio = true;
   }
+  if (!d.config.migraciones.includes('gmf-bancolombia-2026-11')) {
+    // Bancolombia cobra el 4x1000: desde ahora los pagos NUEVOS que salen de ella se descuentan con ese cobro (lo anterior no cambia).
+    for (const c of d.cuentasDinero) if (/bancolombia/i.test(c.nombre) && c.gmf == null) c.gmf = true;
+    d.config.migraciones.push('gmf-bancolombia-2026-11');
+    cambio = true;
+  }
   if (!d.config.migraciones.includes('cuentas-reparar-2026-11')) {
     // La primera versión marcaba como "sin cuenta a propósito" lo que se guardaba sin elegir cuenta (incluso al solo editar un gasto
     // viejo). Esa marca se quita: esos pagos vuelven a avisarse hasta que se les elija la cuenta de la que salieron.
@@ -565,7 +571,16 @@ export const hayDemo = () => state.data.movimientos.some((m) => m.demo) || state
 // Se deshace solo al editar, borrar o volver un pago a pendiente. Lo que no tiene cuenta no mueve ningún saldo.
 const redondear = (n) => Math.round(n * 100) / 100;
 const efectoIngreso = (i) => (i && i.cuentaId ? { id: i.cuentaId, d: Number(i.monto) || 0 } : null);
-const efectoMov = (m) => (m && m.cuentaId && m.estado === 'pagado' ? { id: m.cuentaId, d: -(Number(m.monto) || 0) } : null);
+// 4x1000 (GMF): algunas cuentas cobran 0,4 % de lo que sale. Los pagos NUEVOS que salen de una cuenta que lo cobra llevan la marca `gmf` y se descuentan
+// con ese cobro (monto + 4x1000); lo que ya estaba pagado antes no cambia. El monto del gasto sigue siendo el valor de la compra.
+export const GMF = 0.004;
+export const gmfDe = (m) => (m && m.gmf ? Math.round((Number(m.monto) || 0) * GMF) : 0);
+const efectoMov = (m) => (m && m.cuentaId && m.estado === 'pagado' ? { id: m.cuentaId, d: -((Number(m.monto) || 0) + gmfDe(m)) } : null);
+// Se llama cuando un pago empieza a salir de una cuenta: lo marca si esa cuenta cobra el 4x1000.
+function marcarGmf(m) {
+  const c = m.cuentaId && m.estado === 'pagado' ? state.data.cuentasDinero.find((x) => x.id === m.cuentaId) : null;
+  if (c && c.gmf) m.gmf = true; else delete m.gmf;
+}
 function moverSaldo(e, signo) {
   if (!e) return;
   const c = state.data.cuentasDinero.find((x) => x.id === e.id);
@@ -600,8 +615,8 @@ export function asignarCuentas(asignaciones) {
   for (const a of asignaciones) {
     const m = state.data.movimientos.find((x) => x.id === a.id);
     if (!m) continue;
-    if (a.cuentaId && cuentaDinero(a.cuentaId)) { const antes = efectoMov(m); m.cuentaId = a.cuentaId; delete m.yaEnSaldo; moverSaldo(antes, -1); moverSaldo(efectoMov(m), +1); }
-    else { moverSaldo(efectoMov(m), -1); delete m.cuentaId; m.yaEnSaldo = true; }
+    if (a.cuentaId && cuentaDinero(a.cuentaId)) { const antes = efectoMov(m); m.cuentaId = a.cuentaId; delete m.yaEnSaldo; marcarGmf(m); moverSaldo(antes, -1); moverSaldo(efectoMov(m), +1); }
+    else { moverSaldo(efectoMov(m), -1); delete m.cuentaId; delete m.gmf; m.yaEnSaldo = true; }
   }
   save();
 }
@@ -626,6 +641,7 @@ export function addMov(m) {
   if (mov.estado === 'pagado' && mov.hora == null) mov.hora = mov.fecha === todayISO() ? nowHHMM() : '';
   // Un gasto pagado SIEMPRE se descuenta de una cuenta (salvo efectivo o tarjeta de crédito): si no se eligió, la sugerida.
   if (mov.estado === 'pagado' && !mov.cuentaId && !mov.yaEnSaldo && state.data.cuentasDinero.length && !esMedioSinCuenta(mov.medio)) mov.cuentaId = cuentaSugerida('gasto', mov.concepto) || undefined;
+  marcarGmf(mov);
   state.data.movimientos.push(mov);
   moverSaldo(efectoMov(mov), +1);
   save();
@@ -635,7 +651,9 @@ export function updateMov(id, patch) {
   const m = state.data.movimientos.find((x) => x.id === id);
   if (m) {
     const antes = efectoMov(m);
+    const cuentaAntes = m.cuentaId;
     Object.assign(m, patch);
+    if (m.estado === 'pagado' && m.cuentaId) { if (!antes || m.cuentaId !== cuentaAntes) marcarGmf(m); } else delete m.gmf;
     moverSaldo(antes, -1); // se deshace lo anterior…
     moverSaldo(efectoMov(m), +1); // …y se aplica lo nuevo
   }
@@ -765,8 +783,9 @@ export function sincronizarAutomaticos() {
     for (const m of sinCuenta) {
       m.cuentaId = cuentaSugerida('gasto', m.concepto);
       if (!m.cuentaId) continue;
+      marcarGmf(m);
       moverSaldo(efectoMov(m), +1);
-      por[m.cuentaId] = (por[m.cuentaId] || 0) + m.monto;
+      por[m.cuentaId] = (por[m.cuentaId] || 0) + m.monto + gmfDe(m);
     }
     state.avisoAuto = { n: sinCuenta.length, por };
     cambio = true;

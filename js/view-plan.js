@@ -4,7 +4,7 @@ import {
   h, money, uid, todayISO, addDays, dayShort, monthName, pct,
 } from './util.js';
 import {
-  state, hooks, planCaja, saveCuentaDinero, delCuentaDinero, setPlanConfig, saveCompromiso, compromisoGastado, compromisosPorAjustar, atribuido, netoCompra, saveRutina, delRutina, setPlanMaximo, marcaPago,
+  state, hooks, planCaja, saveCuentaDinero, delCuentaDinero, setPlanConfig, saveCompromiso, compromisoGastado, compromisosPorAjustar, atribuido, netoCompra, saveRutina, delRutina, setPlanMaximo, marcaPago, gmfDe,
 } from './store.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
 import { card, lineaSaldo } from './charts.js';
@@ -24,12 +24,14 @@ function modalCuenta(c) {
   c = c || { id: uid(), nombre: '', saldo: 0, fecha: todayISO() };
   const fNombre = h('input', { type: 'text', value: c.nombre, placeholder: 'Ej. Bancolombia, BBVA, Nequi, Efectivo' });
   const fSaldo = moneyInput(c.saldo);
+  const fGmf = h('input', { type: 'checkbox', checked: !!c.gmf });
   modal(nueva ? 'Nueva cuenta o billetera' : 'Editar cuenta', [
     field('Nombre', fNombre, 'full'), field('Saldo de hoy', fSaldo, 'full'),
+    h('label', { class: 'switch full' }, fGmf, 'Esta cuenta cobra el 4x1000: se suma a lo que se descuenta en los pagos nuevos'),
   ], {
     onSave: () => {
       if (!fNombre.value.trim()) return 'Escribe el nombre.';
-      saveCuentaDinero({ ...c, nombre: fNombre.value.trim(), saldo: fSaldo.getValue(), fecha: todayISO() });
+      saveCuentaDinero({ ...c, nombre: fNombre.value.trim(), saldo: fSaldo.getValue(), fecha: todayISO(), gmf: fGmf.checked || undefined });
       hooks.rerender();
     },
     peligro: nueva ? null : { label: 'Eliminar', fn: () => { delCuentaDinero(c.id); hooks.rerender(); } },
@@ -111,7 +113,7 @@ function modalGastoRapido() {
       if (r.financiado) { toast(r.financiado()); hooks.rerender(); return; }
       const mov = addMov(r);
       recordarCuenta('gasto', r.concepto, mov.cuentaId);
-      toast(avisoCuenta('gasto', r.monto, mov.cuentaId) || 'Gasto registrado');
+      toast(avisoCuenta('gasto', r.monto, mov.cuentaId, mov) || 'Gasto registrado');
       hooks.rerender();
     },
   });
@@ -143,13 +145,13 @@ export function renderPlan(root) {
     ].sort((a, b) => marcaPago(b.m).localeCompare(marcaPago(a.m))).slice(0, 15);
     const detalle = movs.length ? h('details', { class: 'full' }, h('summary', {}, '¿Qué movió este saldo?'),
       movs.map(({ m, signo, texto }) => h('div', { class: 'list-item' },
-        h('div', {}, h('div', { class: 'name' }, texto), h('div', { class: 'meta' }, dayShort(m.fecha) + (m.hora ? ' ' + m.hora : '') + (signo < 0 ? '' : ' · ingreso'))),
+        h('div', {}, h('div', { class: 'name' }, texto), h('div', { class: 'meta' }, dayShort(m.fecha) + (m.hora ? ' ' + m.hora : '') + (signo < 0 ? (m.gmf ? ` · incluye ${money(gmfDe(m))} de 4x1000` : '') : ' · ingreso'))),
         signo < 0
-          ? h('button', { class: 'btn ghost sm num', title: 'Abrir para corregirlo', onclick: () => editarMov(m) }, '− ' + money(m.monto))
+          ? h('button', { class: 'btn ghost sm num', title: 'Abrir para corregirlo', onclick: () => editarMov(m) }, '− ' + money(m.monto + gmfDe(m)))
           : h('span', { class: 'amt num' }, '+ ' + money(m.monto))))) : null;
     return h('div', {},
       h('div', { class: 'list-item' },
-        h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, 'Saldo al ' + dayShort(c.fecha) + (movimientoHoy(c.id) ? ' · ' + movimientoHoy(c.id) : ''))),
+        h('div', {}, h('div', { class: 'name' }, c.nombre), h('div', { class: 'meta' }, 'Saldo al ' + dayShort(c.fecha) + (movimientoHoy(c.id) ? ' · ' + movimientoHoy(c.id) : '') + (c.gmf ? ' · cobra 4x1000' : ''))),
         h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } }, inp,
           h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + c.nombre, onclick: () => modalCuenta(c) }, '✎'))),
       detalle);

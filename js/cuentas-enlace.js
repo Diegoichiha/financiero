@@ -2,7 +2,7 @@
 // Un ingreso con cuenta SUMA a esa cuenta; un pago con cuenta RESTA. Se deshace solo al editar, borrar o volver a pendiente.
 import { h, money, dayShort, todayISO } from './util.js';
 import {
-  state, hooks, marcarPagado, cuentaSugerida, recordarCuenta, cuentaDinero, esMedioSinCuenta, sum,
+  state, hooks, marcarPagado, cuentaSugerida, recordarCuenta, cuentaDinero, esMedioSinCuenta, sum, gmfDe,
 } from './store.js';
 import { modal, select, field, toast } from './ui.js';
 
@@ -18,12 +18,13 @@ export function selectorCuenta(valor, tipo, ninguna) {
 }
 
 // Mensaje corto con el efecto que tuvo en la cuenta (se llama DESPUÉS de guardar).
-export function avisoCuenta(tipo, monto, cuentaId) {
+export function avisoCuenta(tipo, monto, cuentaId, mov) {
   const c = cuentaDinero(cuentaId);
   if (!c) return null;
+  const gmf = tipo === 'gasto' ? gmfDe(mov) : 0;
   return tipo === 'ingreso'
     ? `Se sumaron ${money(monto)} a ${c.nombre} · ahora tiene ${money(c.saldo)}`
-    : `Se descontaron ${money(monto)} de ${c.nombre} · ahora tiene ${money(c.saldo)}`;
+    : `Se descontaron ${money(monto)}${gmf ? ` + ${money(gmf)} de 4x1000` : ''} de ${c.nombre} · ahora tiene ${money(c.saldo)}`;
 }
 
 // "Marcar pagado": pregunta de qué cuenta salió el pago y lo descuenta de "Tengo hoy".
@@ -40,7 +41,7 @@ export function pagarMov(m, alTerminar) {
     onSave: () => {
       recordarCuenta('gasto', m.concepto, sel.value);
       marcarPagado(m.id, true, sel.value);
-      toast(avisoCuenta('gasto', m.monto, sel.value) || 'Marcado como pagado');
+      toast(avisoCuenta('gasto', m.monto, sel.value, m) || 'Marcado como pagado');
       terminar();
     },
   });
@@ -49,15 +50,16 @@ export function pagarMov(m, alTerminar) {
 // Volver un pago a pendiente: la plata vuelve sola a la cuenta de donde salió.
 export function desmarcarPago(m, alTerminar) {
   const c = cuentaDinero(m.cuentaId);
+  const devuelto = m.monto + gmfDe(m); // incluye el 4x1000 si lo llevaba
   marcarPagado(m.id, false);
-  toast(c ? `Se devolvieron ${money(m.monto)} a ${c.nombre} · ahora tiene ${money(c.saldo)}` : 'Vuelto a pendiente');
+  toast(c ? `Se devolvieron ${money(devuelto)} a ${c.nombre} · ahora tiene ${money(c.saldo)}` : 'Vuelto a pendiente');
   (alTerminar || (() => hooks.rerender()))();
 }
 
 // Lo que entró y salió hoy de una cuenta, para ver al instante cómo se movió su saldo.
 export function movimientoHoy(cuentaId) {
   const hoy = todayISO();
-  const sale = sum(state.data.movimientos.filter((m) => m.estado === 'pagado' && m.fecha === hoy && m.cuentaId === cuentaId));
+  const sale = sum(state.data.movimientos.filter((m) => m.estado === 'pagado' && m.fecha === hoy && m.cuentaId === cuentaId), (m) => m.monto + gmfDe(m));
   const entra = sum(state.data.ingresos.filter((i) => i.fecha === hoy && i.cuentaId === cuentaId));
   return [entra > 0 ? `+ ${money(entra)} hoy` : null, sale > 0 ? `− ${money(sale)} hoy` : null].filter(Boolean).join(' · ');
 }

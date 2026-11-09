@@ -7,7 +7,7 @@ import {
   instancia, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
   addMov, updateMov, delMov, addIngreso, updateIngreso, delIngreso, saveFuente, delFuente, save,
   planGasto, setEsperado, addEsperado, delEsperado, setCobros, cuentaSugerida, recordarCuenta,
-  tarjetaById, registrarCompraTarjeta, registrarCompraAddi, fechaCuotaAddi,
+  tarjetaById, registrarCompraTarjeta, registrarCompraAddi, fechaCuotaAddi, gmfDe,
 } from './store.js';
 import { modal, confirmar, field, moneyInput, select, toast, copiar } from './ui.js';
 import { medidor } from './charts.js';
@@ -386,7 +386,7 @@ export function editarMov(m) {
       const antes = m.cuentaId;
       updateMov(m.id, r);
       recordarCuenta('gasto', r.concepto, r.cuentaId);
-      if (r.estado === 'pagado' && r.cuentaId && r.cuentaId !== antes) toast(avisoCuenta('gasto', r.monto, r.cuentaId));
+      if (r.estado === 'pagado' && r.cuentaId && r.cuentaId !== antes) toast(avisoCuenta('gasto', r.monto, r.cuentaId, m));
       hooks.rerender();
     },
     peligro: { label: 'Eliminar', fn: () => { delMov(m.id); hooks.rerender(); } },
@@ -416,7 +416,7 @@ export function renderMovimientos(root) {
     const mov = addMov(r);
     recordarCuenta('gasto', r.concepto, mov.cuentaId);
     enfocarConcepto = true;
-    toast(avisoCuenta('gasto', r.monto, mov.cuentaId) || 'Agregado: ' + r.concepto);
+    toast(avisoCuenta('gasto', r.monto, mov.cuentaId, mov) || 'Agregado: ' + r.concepto);
     hooks.rerender();
   };
   const formCard = h('section', { class: 'card' },
@@ -450,7 +450,7 @@ export function renderMovimientos(root) {
       h('td', {}, tipoDot(m.tipo)),
       h('td', {}, centroNombre(m.centro)),
       h('td', {}, m.medio || '—',
-        m.estado === 'pagado' && m.cuentaId && nombreCuenta(m.cuentaId) ? h('div', { class: 'card-sub' }, '↳ ' + nombreCuenta(m.cuentaId)) : null),
+        m.estado === 'pagado' && m.cuentaId && nombreCuenta(m.cuentaId) ? h('div', { class: 'card-sub' }, '↳ ' + nombreCuenta(m.cuentaId) + (m.gmf ? ` · + ${money(gmfDe(m))} de 4x1000` : '')) : null),
       h('td', { class: 'r' }, money(m.monto)),
       h('td', {}, m.estado === 'pendiente'
         ? h('button', { class: 'chip', title: 'Marcar como pagado', onclick: () => pagarMov(m) }, 'Pendiente · pagar')

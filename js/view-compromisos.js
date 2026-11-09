@@ -5,7 +5,7 @@ import {
 } from './util.js';
 import {
   state, hooks, cuentaSugerida, recordarCuenta, saveCompromiso, delCompromiso, compromisoGastado, margenMes, addMov, sum, categoria, planCaja,
-  gastosDeCompromiso, guardarGastoReal, todasLasCompras, atribuido, reservadoDe, cuentaDinero, ajustesDeCompromiso, gastoPropio, marcaPago, tieneGastoReal,
+  gastosDeCompromiso, guardarGastoReal, todasLasCompras, atribuido, reservadoDe, cuentaDinero, ajustesDeCompromiso, gastoPropio, gmfDe, GMF, marcaPago, tieneGastoReal,
 } from './store.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
 
@@ -67,9 +67,9 @@ function modalGasto(c) {
     onSave: () => {
       if (!fConcepto.value.trim()) return 'Escribe el concepto.';
       if (!fMonto.getValue()) return 'Escribe el valor.';
-      addMov({ fecha: fFecha.value, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo: 'variable', categoria: fCat.value, centro: 'hogar', medio: fMedio.value, compromisoId: c.id, cuentaId: fCuenta.value || undefined });
+      const mov = addMov({ fecha: fFecha.value, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), tipo: 'variable', categoria: fCat.value, centro: 'hogar', medio: fMedio.value, compromisoId: c.id, cuentaId: fCuenta.value || undefined });
       recordarCuenta('gasto', '', fCuenta.value);
-      toast(avisoCuenta('gasto', fMonto.getValue(), fCuenta.value) || 'Gasto agregado a ' + c.nombre);
+      toast(avisoCuenta('gasto', fMonto.getValue(), mov.cuentaId, mov) || 'Gasto agregado a ' + c.nombre);
       hooks.rerender();
     },
   });
@@ -123,8 +123,9 @@ export function abrirGastoReal(c) {
     if (resto < 0) info.textContent = `Las partes suman ${money(partes + propio)}, más que el gasto real (${money(real)}). Sube el gasto real o baja una parte.`;
     else if (resto > 0) {
       // lo que este mismo gasto ya tenía descontado de esa cuenta se devuelve antes de volver a descontar
-      const yaDescontado = cu ? sum(ajustes.filter((x) => x.cuentaId === cu.id)) : 0;
-      info.textContent = cu ? `${money(resto)} salen de ${cu.nombre} (${money(cu.saldo + yaDescontado)} → quedará ${money(cu.saldo + yaDescontado - resto)}).` : `${money(resto)} se registran sin descontar de ninguna cuenta (elige una cuenta solo si quieres descontarlos).`;
+      const yaDescontado = cu ? sum(ajustes.filter((x) => x.cuentaId === cu.id), (x) => x.monto + gmfDe(x)) : 0;
+      const gmf = cu && cu.gmf ? Math.round(resto * GMF) : 0; // 4x1000 de esa cuenta
+      info.textContent = cu ? `${money(resto)}${gmf ? ` + ${money(gmf)} de 4x1000` : ''} salen de ${cu.nombre} (${money(cu.saldo + yaDescontado)} → quedará ${money(cu.saldo + yaDescontado - resto - gmf)}).` : `${money(resto)} se registran sin descontar de ninguna cuenta (elige una cuenta solo si quieres descontarlos).`;
     }
     else info.textContent = partes > 0 ? 'Todo el gasto ya estaba pagado dentro de esas compras: no se descuenta de ninguna cuenta.' : '';
   };
@@ -177,7 +178,7 @@ export function abrirGastoReal(c) {
       }
       const r = guardarGastoReal(c.id, { real, partes: [...por].map(([ref, monto]) => ({ ref, monto })), cuentaId: resto > 0 ? fCuenta.value : '' });
       if (r.mov && fCuenta.value) recordarCuenta('gasto', '', fCuenta.value);
-      toast(r.mov ? (avisoCuenta('gasto', r.mov.monto, r.mov.cuentaId) || `Gasto real guardado: ${money(real)}`) : `Gasto real guardado: ${money(real)}${r.atribuido ? ' (sin descontar nada otra vez)' : ''}`);
+      toast(r.mov ? (avisoCuenta('gasto', r.mov.monto, r.mov.cuentaId, r.mov) || `Gasto real guardado: ${money(real)}`) : `Gasto real guardado: ${money(real)}${r.atribuido ? ' (sin descontar nada otra vez)' : ''}`);
       hooks.rerender();
     },
   });
