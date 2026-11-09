@@ -7,10 +7,11 @@ import {
   instancia, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
   addMov, updateMov, delMov, addIngreso, updateIngreso, delIngreso, saveFuente, delFuente, save,
   planGasto, setEsperado, addEsperado, delEsperado, setCobros, cuentaSugerida, recordarCuenta,
+  tarjetaById, registrarCompraTarjeta, registrarCompraAddi, fechaCuotaAddi,
 } from './store.js';
 import { modal, confirmar, field, moneyInput, select, toast, copiar } from './ui.js';
 import { medidor } from './charts.js';
-import { extractoPagadoEn } from './creditos.js';
+import { extractoPagadoEn, corteDeFecha, pagoDeCorte, cuotaPmt } from './creditos.js';
 import { selectorCuenta, esMedioSinCuenta, pagarMov, desmarcarPago, nombreCuenta, avisoCuenta, barraCuentas } from './cuentas-enlace.js';
 
 const centroOpts = () => state.data.centros.map((c) => ({ value: c.id, label: c.nombre }));
@@ -181,7 +182,12 @@ export function movForm(ini) {
   const fMonto = moneyInput(ini.monto);
   let fCat = select(catOpts(tipo), ini.categoria || catOpts(tipo)[0]?.value);
   const fCentro = select(centroOpts(), ini.centro || (state.centro === 'todos' ? 'hogar' : state.centro));
-  const fMedio = select([{ value: '', label: '—' }, ...state.data.medios.map((m) => ({ value: m, label: m }))], ini.medio || '');
+  // Al registrar algo NUEVO también se puede elegir la tarjeta de crédito o ADDI: el formulario muestra sus campos (cuotas, interés, fecha de pago…).
+  const mediosFin = ini.id ? [] : [...state.data.tarjetas.map((t) => ({ value: '@tc:' + t.id, label: `Tarjeta ${t.nombre} (crédito)` })), { value: '@addi', label: 'ADDI (en cuotas)' }];
+  // Al registrar algo nuevo, el medio genérico "TC Rappi" se reemplaza por la opción de la tarjeta (que sí guarda cuotas, corte y fecha de pago).
+  const medioTarjeta = (m) => /tc|tarjeta de cr|cr[eé]dito|rappi card/i.test(m);
+  const mediosBase = state.data.medios.filter((m) => ini.id || !state.data.tarjetas.length || !medioTarjeta(m));
+  const fMedio = select([{ value: '', label: '—' }, ...mediosBase.map((m) => ({ value: m, label: m })), ...mediosFin], ini.medio || '');
   // De qué cuenta salió la plata: se descuenta de "Tengo hoy" en el Plan del mes (efectivo y tarjeta no descuentan de una cuenta).
   const cuentaOk = (id) => (state.data.cuentasDinero.some((c) => c.id === id) ? id : '');
   // Lo que tú eliges a mano manda: el autocompletado (por concepto) nunca lo pisa.
@@ -198,7 +204,7 @@ export function movForm(ini) {
   // cuenta al compromiso sin volver a descontar de ninguna cuenta. Vacío = toda la compra es del compromiso.
   const atrib0 = (ini.atribuciones || [])[0];
   if (atrib0) fComp.value = atrib0.compromisoId;
-  const fParte = moneyInput(atrib0 ? atrib0.monto : 0);
+  const fParte2 = moneyInput(atrib0 ? atrib0.monto : 0);
   const fEstado = select([{ value: 'pagado', label: 'Pagado' }, { value: 'pendiente', label: 'Pendiente' }], ini.estado || 'pagado');
   const catWrap = h('div', {}, fCat);
   const seg = h('div', { class: 'seg small', role: 'group', 'aria-label': 'Tipo de gasto' });
@@ -229,29 +235,129 @@ export function movForm(ini) {
     if (!tocado.has('cuenta')) fCuenta.value = esMedioSinCuenta(fMedio.value) ? '' : (cuentaOk(prev.cuentaId) || cuentaSugerida('gasto', prev.concepto));
   });
 
+  // ---- Compra con tarjeta de crédito o con ADDI: cuotas, interés y fecha de pago ----
+  const fCuotas = h('input', { type: 'number', min: 1, max: 60, value: 1 });
+  const fTasa = h('input', { type: 'number', min: 0, step: 0.01, value: 0, placeholder: '0 = sin interés' });
+  const fCuotaFin = moneyInput(0);
+  let cuotaManual = false;
+  const fPrimera = h('input', { type: 'date', value: '' });
+  const fPartes = h('input', { type: 'number', min: 1, max: 10, value: 1 });
+  const infoFin = h('div', { class: 'card-sub full', 'aria-live': 'polite', style: { gridColumn: '1 / -1' } }); // ocupa toda la fila también fuera de un diálogo
+  const modo = () => (fMedio.value === '@addi' ? 'addi' : fMedio.value.startsWith('@tc:') ? 'tc' : '');
+  const refrescarFin = () => {
+    const m = modo();
+    if (!m) return;
+    const n = Math.max(1, Math.round(Number(fCuotas.value) || 1));
+    const tasa = Number(fTasa.value) || 0;
+    const valor = fMonto.getValue();
+    if (!cuotaManual) fCuotaFin.value = valor && (n > 1 || m === 'addi') ? num(cuotaPmt(valor, n, tasa)) : '';
+    const cuota = fCuotaFin.getValue();
+    if (m === 'tc') {
+      const t = tarjetaById(fMedio.value.slice(4));
+      const fecha = fFecha.value || todayISO();
+      const corte = corteDeFecha(fecha, t);
+      const partes = Math.max(1, Math.round(Number(fPartes.value) || 1));
+      infoFin.textContent = (n > 1
+        ? `${n} cuotas de ${money(cuota)}. La primera entra en el extracto del corte ${dayShort(corte)} (se paga el ${dayShort(pagoDeCorte(corte, t))}).`
+        : `Entra en el extracto del corte ${dayShort(corte)} y se paga el ${dayShort(pagoDeCorte(corte, t))}. No se descuenta de ninguna cuenta hasta que pagues la tarjeta.`)
+        + (partes > 1 && n === 1 && valor ? ` Compartida entre ${partes}: tu parte es ${money(valor / partes)}; lo demás queda como reembolso esperado.` : '');
+    } else if (fPrimera.value && valor) {
+      const a = { primera: fPrimera.value };
+      const total = cuota * n;
+      infoFin.textContent = `${n} cuota${n === 1 ? '' : 's'} de ${money(cuota)}: la primera el ${dayShort(fPrimera.value)} y la última el ${dayShort(fechaCuotaAddi(a, n))}. Pagas en total ${money(total)}${total > valor + 1 ? ` (${money(total - valor)} de intereses)` : ''}. Las cuotas aparecen solas en "Falta por pagar".`;
+    } else infoFin.textContent = 'Escribe el valor y la fecha de pago de la primera cuota.';
+  };
+  fCuotaFin.addEventListener('input', () => { cuotaManual = true; refrescarFin(); });
+  [fFecha, fMonto, fCuotas, fTasa, fPartes, fPrimera].forEach((el) => el.addEventListener('input', refrescarFin));
+
   const lista = [...new Set(state.data.movimientos.map((m) => m.concepto))].slice(-80);
+  const wHora = field('Hora', fHora);
+  const wTipo = h('div', { class: 'f wide' }, h('span', { style: { fontSize: '12px', color: 'var(--ink-2)' } }, 'Tipo'), seg);
+  const wCentro = field('Centro', fCentro);
+  const wCuenta = state.data.cuentasDinero.length ? field('Pagado desde (se descuenta de "Tengo hoy")', fCuenta, 'wide') : null;
+  const wComp = state.data.compromisos.length ? field('Compromiso (paseo, cumpleaños…)', fComp) : null;
+  const wParte = state.data.compromisos.length ? field('Si solo una parte fue para el compromiso, ¿cuánto? (no se descuenta otra vez; vacío = todo)', fParte2, 'wide') : null;
+  const wCuotas = field('Número de cuotas', fCuotas);
+  const wTasa = field('Interés mensual % (M.V.)', fTasa);
+  const wCuotaFin = field('Valor de cada cuota (puedes ajustarlo)', fCuotaFin, 'wide');
+  const wPrimera = field('Fecha de pago de la primera cuota (las demás, el mismo día de cada mes)', fPrimera, 'wide');
+  const wPartes = field('¿Entre cuántas personas se divide? (contándote; 1 = solo tuya)', fPartes, 'wide');
+  let finActivo = false;
+  const pintarModo = () => {
+    const m = modo();
+    const fin = !!m;
+    const ocultar = (w, si) => { if (w) w.style.display = si ? 'none' : ''; };
+    [wHora, wTipo, wCentro, wCuenta, wComp, wParte].forEach((w) => ocultar(w, fin));
+    [wCuotas, wTasa, wCuotaFin].forEach((w) => ocultar(w, !fin));
+    ocultar(wPrimera, m !== 'addi');
+    ocultar(wPartes, m !== 'tc');
+    ocultar(infoFin, !fin);
+    if (fin !== finActivo) { // con tarjeta o ADDI la categoría se elige entre todas
+      finActivo = fin;
+      const actual = fCat.value;
+      const opts = fin ? catOpts() : catOpts(tipo);
+      // con tarjeta o ADDI se propone "Otros variables" (no "Mercado", que cambiaría el presupuesto de mercado) salvo que ya hayas elegido categoría
+      const porDefecto = fin && !tocado.has('categoria') && opts.some((o) => o.value === 'otros-var') ? 'otros-var' : actual;
+      fCat = select(opts, opts.some((o) => o.value === porDefecto) ? porDefecto : opts[0]?.value);
+      catWrap.replaceChildren(fCat);
+    }
+    if (m === 'addi') {
+      if (Number(fCuotas.value) <= 1) fCuotas.value = 3;
+      if (!fPrimera.value && fFecha.value) fPrimera.value = fechaCuotaAddi({ primera: fFecha.value }, 2);
+    }
+    if (fin) cuotaManual = false;
+    refrescarFin();
+  };
+  fMedio.addEventListener('change', pintarModo);
   const nodes = [
     h('datalist', { id: 'dl-conceptos' }, lista.map((c) => h('option', { value: c }))),
     field('Fecha', fFecha),
-    field('Hora', fHora),
+    wHora,
     field('Concepto', fConcepto, 'wide full'),
     field('Monto', fMonto),
-    h('div', { class: 'f wide' }, h('span', { style: { fontSize: '12px', color: 'var(--ink-2)' } }, 'Tipo'), seg),
+    wTipo,
     field('Categoría', catWrap),
-    field('Centro', fCentro),
+    wCentro,
     field('Medio de pago', fMedio),
-    state.data.cuentasDinero.length ? field('Pagado desde (se descuenta de "Tengo hoy")', fCuenta, 'wide') : null,
-    state.data.compromisos.length ? field('Compromiso (paseo, cumpleaños…)', fComp) : null,
-    state.data.compromisos.length ? field('Si solo una parte fue para el compromiso, ¿cuánto? (no se descuenta otra vez; vacío = todo)', fParte, 'wide') : null,
+    wCuotas, wTasa, wCuotaFin, wPrimera, wPartes, infoFin,
+    wCuenta,
+    wComp,
+    wParte,
     ini.id ? field('Estado', fEstado) : null,
     field('Nota', fNota, 'wide full'),
   ];
+  pintarModo();
   const read = () => {
     if (!fConcepto.value.trim()) return 'Escribe el concepto.';
     if (!fMonto.getValue()) return 'Escribe el monto.';
     if (!fFecha.value) return 'Elige la fecha.';
+    const mf = modo();
+    if (mf) {
+      const n = Math.max(1, Math.round(Number(fCuotas.value) || 1));
+      const tasa = Number(fTasa.value) || 0;
+      const valor = fMonto.getValue();
+      const cuota = fCuotaFin.getValue() || Math.round(cuotaPmt(valor, n, tasa));
+      const concepto = fConcepto.value.trim();
+      if (mf === 'tc') {
+        const partes = Math.max(1, Math.round(Number(fPartes.value) || 1));
+        if (n > 1 && partes > 1) return 'Dividir entre personas solo sirve en compras de una sola cuota.';
+        if (n > 1 && !cuota) return 'Falta el valor de la cuota.';
+        const tid = fMedio.value.slice(4);
+        return { financiado: () => {
+          const t = tarjetaById(tid);
+          const r = registrarCompraTarjeta(tid, { fecha: fFecha.value, concepto, monto: valor, cuotas: n, tasaMV: tasa, cuota, categoria: fCat.value, partes });
+          return `Compra en ${t.nombre}: ${n > 1 ? `${n} cuotas de ${money(cuota)}, la primera` : 'entra'} en el extracto del corte ${dayShort(r.corte)} (se paga el ${dayShort(r.pago)}).`;
+        } };
+      }
+      if (!fPrimera.value) return 'Elige la fecha de pago de la primera cuota.';
+      if (!cuota) return 'Falta el valor de la cuota.';
+      return { financiado: () => {
+        registrarCompraAddi({ concepto, fecha: fFecha.value, valor, cuotas: n, cuota, tasaMV: tasa, primera: fPrimera.value, categoria: fCat.value });
+        return `ADDI: ${n} cuota${n === 1 ? '' : 's'} de ${money(cuota)} desde el ${dayShort(fPrimera.value)}. Quedan en "Falta por pagar" y en Créditos.`;
+      } };
+    }
     const estado = ini.id ? fEstado.value : 'pagado';
-    const parte = fComp.value ? fParte.getValue() : 0;
+    const parte = fComp.value ? fParte2.getValue() : 0;
     if (parte > fMonto.getValue()) return 'La parte para el compromiso no puede ser mayor que el valor del gasto.';
     const soloParte = parte > 0 && parte < fMonto.getValue();
     // Nuevo y sin tocar la hora: la de este momento (si es de hoy). Al pasar un pendiente a pagado también se pone la de ahora.
@@ -305,6 +411,7 @@ export function renderMovimientos(root) {
   const agregar = () => {
     const r = form.read();
     if (typeof r === 'string') { toast(r); return; }
+    if (r.financiado) { toast(r.financiado()); hooks.rerender(); return; }
     ultimoTipo = r.tipo;
     const mov = addMov(r);
     recordarCuenta('gasto', r.concepto, mov.cuentaId);

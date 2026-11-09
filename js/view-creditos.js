@@ -1,16 +1,17 @@
-// Pestaña Créditos: tarjeta Rappi (compras, cuotas y proyección de pagos) y créditos de cuota fija (carro).
+// Pestaña Créditos: tarjeta Rappi (compras, cuotas y proyección de pagos), créditos de cuota fija (carro) y compras en cuotas con ADDI.
 import {
   h, money, uid, todayISO, daysBetween, addMonths, parse, MESES_C, monthName, num,
 } from './util.js';
 import {
   state, hooks, tarjetaById, saveCompraTarjeta, delCompraTarjeta, savePlanTarjeta, delPlanTarjeta, saveTarjetaConfig,
-  saveCredito, delCredito, categoria, sum,
+  saveCredito, delCredito, categoria, sum, saveAddi, delAddi, estadoAddi, fechaCuotaAddi,
 } from './store.js';
 import {
   corteDeFecha, pagoDeCorte, corteMasN, extracto, proyeccion, estadoPlan, cuotaPmt, amortizacion, mesesEntre,
 } from './creditos.js';
 import { card, stackedColumns, disposeCharts } from './charts.js';
 import { modal, field, moneyInput, select, toast } from './ui.js';
+import { pagarMov } from './cuentas-enlace.js';
 
 const fechaLarga = (f) => `${parse(f).getDate()} ${MESES_C[parse(f).getMonth()]} ${parse(f).getFullYear()}`;
 const fechaCorta = (f) => `${parse(f).getDate()} ${MESES_C[parse(f).getMonth()]}`;
@@ -142,6 +143,58 @@ function modalCredito(c) {
   });
 }
 
+// ---------- Compras en cuotas con ADDI ----------
+function modalAddi(existente) {
+  const nueva = !existente;
+  const a = existente || { id: uid(), concepto: '', fecha: todayISO(), valor: 0, cuotas: 3, cuota: 0, tasaMV: 0, primera: fechaCuotaAddi({ primera: todayISO() }, 2), categoria: 'otros-var' };
+  const fConcepto = h('input', { type: 'text', value: a.concepto, placeholder: 'Ej. Celular, nevera, zapatos…' });
+  const fFecha = h('input', { type: 'date', value: a.fecha || '' });
+  const fValor = moneyInput(a.valor);
+  const fCuotas = h('input', { type: 'number', min: 1, max: 60, value: a.cuotas });
+  const fTasa = h('input', { type: 'number', min: 0, step: 0.01, value: a.tasaMV || 0, placeholder: '0 = sin interés' });
+  const fCuota = moneyInput(a.cuota);
+  const fPrimera = h('input', { type: 'date', value: a.primera || '' });
+  const fCat = select(catOpts(), a.categoria || 'otros-var');
+  let cuotaManual = false;
+  const info = h('div', { class: 'card-sub full', 'aria-live': 'polite' });
+  const refrescar = () => {
+    const n = Math.max(1, Math.round(Number(fCuotas.value) || 1));
+    const valor = fValor.getValue();
+    if (!cuotaManual && valor && (nueva || document.activeElement !== fCuota)) fCuota.value = num(cuotaPmt(valor, n, Number(fTasa.value) || 0));
+    const cuota = fCuota.getValue();
+    const total = cuota * n;
+    info.textContent = fPrimera.value && cuota
+      ? `${n} cuota${n === 1 ? '' : 's'} de ${money(cuota)}: la primera el ${fechaLarga(fPrimera.value)} y la última el ${fechaLarga(fechaCuotaAddi({ primera: fPrimera.value }, n))}. Pagas en total ${money(total)}${valor && total > valor + 1 ? ` (${money(total - valor)} de intereses)` : ''}.`
+      : 'Escribe el valor y la fecha de pago de la primera cuota.';
+  };
+  fCuota.addEventListener('input', () => { cuotaManual = true; refrescar(); });
+  [fValor, fCuotas, fTasa].forEach((el) => el.addEventListener('input', () => { if (!nueva) cuotaManual = false; refrescar(); }));
+  fPrimera.addEventListener('input', refrescar);
+  cuotaManual = !nueva; // al editar se respeta la cuota que ya tenía hasta que cambies el valor, las cuotas o el interés
+  refrescar();
+  modal(nueva ? 'Nueva compra con ADDI' : 'Editar compra con ADDI', [
+    field('Concepto', fConcepto, 'full'), field('Fecha de la compra', fFecha), field('Valor de la compra', fValor),
+    field('Número de cuotas', fCuotas), field('Interés mensual % (M.V.)', fTasa),
+    field('Valor de cada cuota (puedes ajustarlo)', fCuota, 'full'),
+    field('Fecha de pago de la primera cuota (las demás, el mismo día de cada mes)', fPrimera, 'full'),
+    field('Categoría', fCat, 'full'), info,
+  ], {
+    onSave: () => {
+      if (!fConcepto.value.trim()) return 'Escribe el concepto.';
+      if (!fValor.getValue()) return 'Escribe el valor de la compra.';
+      if (!fPrimera.value) return 'Elige la fecha de pago de la primera cuota.';
+      const cuota = fCuota.getValue();
+      if (!cuota) return 'Falta el valor de la cuota.';
+      saveAddi({
+        ...a, concepto: fConcepto.value.trim(), fecha: fFecha.value || a.fecha, valor: fValor.getValue(), cuotas: Math.max(1, Math.round(Number(fCuotas.value) || 1)),
+        cuota, tasaMV: Number(fTasa.value) || 0, primera: fPrimera.value, categoria: fCat.value,
+      });
+      hooks.rerender();
+    },
+    peligro: nueva ? null : { label: 'Eliminar', fn: () => { delAddi(a.id); hooks.rerender(); } },
+  });
+}
+
 // ---------- Pantalla ----------
 export function renderCreditos(root) {
   disposeCharts();
@@ -248,6 +301,30 @@ export function renderCreditos(root) {
             : h('div', { class: 'callout' }, 'Con esta cuota no se alcanza a cubrir el interés: revisa el saldo y la tasa.'),
           c.nota ? h('div', { class: 'card-sub' }, c.nota) : null))));
   }
+
+  // ADDI: compras en cuotas con interés. Cada cuota pendiente aparece sola en "Falta por pagar" y en Gastos.
+  const addis = (state.data.addi || []).map((a) => ({ a, e: estadoAddi(a) }));
+  const vivos = addis.filter((x) => !x.e.terminada);
+  const porPagarAddi = sum(vivos, (x) => x.e.porPagar);
+  cards.push(h('section', { class: 'card w6' },
+    h('div', { class: 'card-head' },
+      h('div', {}, h('div', { class: 'card-title' }, 'ADDI'),
+        h('div', { class: 'card-sub' }, vivos.length ? `Te quedan ${money(porPagarAddi)} por pagar en cuotas (cuota × cuotas que faltan).` : 'Compras en cuotas con interés y fecha de pago. También las puedes registrar desde Gastos, eligiendo ADDI como medio de pago.')),
+      h('button', { class: 'btn primary', onclick: () => modalAddi() }, '+ Compra con ADDI')),
+    vivos.length
+      ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'Compra'), h('th', { class: 'r' }, 'Cuota'), h('th', {}, 'Próxima'), h('th', { class: 'r' }, 'Restan'), h('th', { class: 'r' }, 'Por pagar'), h('th', { class: 'r' }, 'Interés M.V.'), h('th'))),
+        h('tbody', {}, vivos.map(({ a, e }) => h('tr', {},
+          h('td', {}, h('b', {}, a.concepto), h('div', { class: 'card-sub' }, `Cuota ${e.pagadas + 1} de ${a.cuotas}`)),
+          h('td', { class: 'r' }, money(a.cuota)),
+          h('td', {}, e.proxima ? fechaCorta(e.proxima.fecha) : '—'),
+          h('td', { class: 'r' }, String(e.restantes)),
+          h('td', { class: 'r' }, money(e.porPagar)),
+          h('td', { class: 'r' }, a.tasaMV ? tasaTxt(a.tasaMV) : '—'),
+          h('td', {}, h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } },
+            e.proxima && e.proxima.mov ? h('button', { class: 'btn sm', title: 'Marcar esta cuota como pagada y elegir la cuenta', onclick: () => pagarMov(e.proxima.mov) }, 'Ya la pagué') : null,
+            h('button', { class: 'btn ghost icon', 'aria-label': 'Editar ' + a.concepto, onclick: () => modalAddi(a) }, '✎'))))))))
+      : h('div', { class: 'muted' }, 'No hay compras con ADDI activas.')));
 
   if (!cards.length) cards.push(h('section', { class: 'card w6' }, h('div', { class: 'empty' }, 'Aún no hay tarjetas ni créditos configurados.')));
   root.replaceChildren(h('div', { class: 'grid' }, ...cards));

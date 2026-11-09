@@ -2,7 +2,7 @@
 import {
   uid, pad, parse, monthName, MESES_C, todayISO, nowHHMM, monthStart, monthEnd, addDays, addMonths, weekStart, daysInMonth, mulberry32,
 } from './util.js';
-import { extractoPagadoEn, corteDeFecha, pagoDeCorte } from './creditos.js';
+import { extractoPagadoEn, corteDeFecha, pagoDeCorte, corteMasN } from './creditos.js';
 
 export const TIPOS = [
   { id: 'recurrente', nombre: 'Recurrentes', corto: 'Recurrente', cssVar: 'var(--s1)' },
@@ -123,7 +123,7 @@ function migrate(d) {
   d.config.autoExcluidos ||= [];
   d.config.colchonPct ??= 10;
   d.medios ||= ['Efectivo', 'Débito', 'Transferencia', 'Otro'];
-  for (const k of ['centros', 'categorias', 'cuentas', 'plantillas', 'fuentesIngreso', 'movimientos', 'ingresos', 'mercadoHistorial', 'tarjetas', 'creditos', 'planIngresos', 'compromisos', 'cuentasDinero', 'rutinas']) d[k] ||= [];
+  for (const k of ['centros', 'categorias', 'cuentas', 'plantillas', 'fuentesIngreso', 'movimientos', 'ingresos', 'mercadoHistorial', 'tarjetas', 'creditos', 'planIngresos', 'compromisos', 'cuentasDinero', 'rutinas', 'addi']) d[k] ||= [];
   d.config.planMaximo ??= true;
   d.config.diaCorte ??= 30;
   if (!d.config.migraciones.includes('plan-nov-2026')) {
@@ -390,7 +390,7 @@ export function ingresoMinimo(mes) {
 
   // Si todavía no eliges los recurrentes del mes, se estima con los del mes anterior
   // (y el pago de la tarjeta con lo que dice su propio extracto).
-  const esAuto = (m) => { const p = plantillaDe(m); return !!(p && p.auto); };
+  const esAuto = (m) => { const p = plantillaDe(m); return !!(p && p.auto) || !!m.addiId; };
   let rec = recDe(mes);
   let origenRec = 'mes';
   if (!rec.some((m) => !esAuto(m))) {
@@ -412,6 +412,13 @@ export function ingresoMinimo(mes) {
       const tj = tarjetaDe(p);
       const est = tj ? extractoPagadoEn(tj, mes).total : 0;
       items.push({ concepto: p.concepto, monto: est > 0 ? est : (tj ? 0 : p.monto), categoria: p.categoria, centro: p.centro, tarjeta: tj || null, estado: 'pendiente', proyectado: true });
+    }
+    // Cuotas de ADDI de ese mes que todavía no tienen su pago creado.
+    for (const a of D.addi || []) {
+      for (const c of cuotasAddi(a)) {
+        if (c.fecha.slice(0, 7) !== mes || rec.some((m) => m.addiId === a.id && m.addiN === c.n) || !centroOk('creditos')) continue;
+        items.push({ concepto: `ADDI · ${a.concepto} (cuota ${c.n} de ${a.cuotas})`, monto: a.cuota, categoria: 'deudas', centro: 'creditos', tarjeta: null, estado: 'pendiente', proyectado: true });
+      }
     }
   }
 
@@ -750,6 +757,7 @@ export function sincronizarAutomaticos() {
     }
   }
   if (sincronizarGastosReales()) cambio = true;
+  if (crearCuotasAddi()) cambio = true;
   // Pagos hechos (desde `conciliarDesde`) que quedaron sin cuenta: se descuentan solos de la cuenta sugerida. Nada que pulsar.
   const sinCuenta = pagosSinCuenta();
   if (sinCuenta.length) {
@@ -1184,6 +1192,80 @@ export function delPlanTarjeta(tid, id) {
   tj.planes = tj.planes.filter((x) => x.id !== id);
   save();
 }
+// ---------- Compras con la tarjeta de crédito (desde el formulario de Gastos o desde Créditos) ----------
+// Una sola cuota: entra en el extracto del corte que le toca. Varias cuotas: queda como compra a cuotas (con su tasa) desde ese extracto.
+export function registrarCompraTarjeta(tid, { fecha, concepto, monto, cuotas = 1, tasaMV = 0, cuota = 0, categoria = 'otros-var', partes = 1 }) {
+  const t = tarjetaById(tid);
+  const corte = corteDeFecha(fecha, t);
+  if (cuotas > 1) {
+    savePlanTarjeta(tid, { id: uid(), concepto, cuota, cuotas, pagadas: 0, corteRef: corteMasN(corte, t, -1), tasaMV, valor: monto, categoria });
+  } else {
+    saveCompraTarjeta(tid, { id: uid(), fecha, concepto, monto, categoria, partes: partes > 1 ? partes : undefined });
+  }
+  return { corte, pago: pagoDeCorte(corte, t) };
+}
+
+// ---------- ADDI: compras en cuotas con interés que se pagan en fechas fijas ----------
+// Cada compra: { id, concepto, fecha, valor, cuotas, cuota, tasaMV, primera (fecha de pago de la primera cuota), categoria }. Se paga una cuota por mes,
+// el mismo día de la primera. Sus cuotas pendientes aparecen solas como pagos por hacer (Plan del mes y Gastos).
+export function fechaCuotaAddi(a, k) {
+  const ym = addMonths(a.primera.slice(0, 7) + '-01', k - 1).slice(0, 7);
+  return `${ym}-${pad(Math.min(Number(a.primera.slice(8)), daysInMonth(ym + '-01')))}`;
+}
+export const cuotasAddi = (a) => Array.from({ length: a.cuotas }, (_, i) => ({ n: i + 1, fecha: fechaCuotaAddi(a, i + 1), monto: a.cuota }));
+const movCuotaAddi = (a, n) => state.data.movimientos.find((m) => m.addiId === a.id && m.addiN === n);
+const datosCuotaAddi = (a, c) => ({ fecha: c.fecha, mes: c.fecha.slice(0, 7), concepto: `ADDI · ${a.concepto} (cuota ${c.n} de ${a.cuotas})`, monto: a.cuota });
+// Cuántas cuotas van, cuántas faltan y cuál sigue. Una cuota sin pago creado y de un mes que ya pasó se da por pagada.
+export function estadoAddi(a) {
+  const mesHoy = todayISO().slice(0, 7);
+  const cuotas = cuotasAddi(a).map((c) => {
+    const mov = movCuotaAddi(a, c.n) || null;
+    return { ...c, mov, pagada: mov ? mov.estado === 'pagado' : c.fecha.slice(0, 7) < mesHoy };
+  });
+  const faltan = cuotas.filter((c) => !c.pagada);
+  return { cuotas, pagadas: cuotas.length - faltan.length, restantes: faltan.length, porPagar: faltan.length * a.cuota, proxima: faltan[0] || null, terminada: faltan.length === 0 };
+}
+function crearCuotasAddi() {
+  const D = state.data;
+  const hoy = todayISO();
+  const meses = [hoy.slice(0, 7), addMonths(hoy, 1).slice(0, 7)];
+  let cambio = false;
+  for (const a of D.addi || []) {
+    for (const c of cuotasAddi(a)) {
+      if (!meses.includes(c.fecha.slice(0, 7)) || movCuotaAddi(a, c.n)) continue;
+      D.movimientos.push({
+        id: uid(), ...datosCuotaAddi(a, c), tipo: 'recurrente', categoria: 'deudas', centro: 'creditos', medio: '', nota: '', estado: 'pendiente', addiId: a.id, addiN: c.n,
+      });
+      cambio = true;
+    }
+  }
+  return cambio;
+}
+export function saveAddi(a) {
+  const D = state.data;
+  const i = D.addi.findIndex((x) => x.id === a.id);
+  if (i >= 0) D.addi[i] = a; else D.addi.push(a);
+  // Los pagos pendientes de esa compra siguen sus datos; los ya pagados no se tocan.
+  for (const m of [...D.movimientos]) {
+    if (m.addiId !== a.id || m.estado !== 'pendiente') continue;
+    if (m.addiN > a.cuotas) { D.movimientos = D.movimientos.filter((x) => x !== m); continue; }
+    Object.assign(m, datosCuotaAddi(a, { n: m.addiN, fecha: fechaCuotaAddi(a, m.addiN) }));
+  }
+  crearCuotasAddi();
+  save();
+}
+export function delAddi(id) {
+  const D = state.data;
+  D.addi = D.addi.filter((a) => a.id !== id);
+  D.movimientos = D.movimientos.filter((m) => !(m.addiId === id && m.estado === 'pendiente'));
+  save();
+}
+export function registrarCompraAddi({ concepto, fecha, valor, cuotas, cuota, tasaMV = 0, primera, categoria = 'otros-var' }) {
+  const a = { id: uid(), concepto, fecha, valor, cuotas, cuota, tasaMV, primera, categoria };
+  saveAddi(a);
+  return a;
+}
+
 export function saveCredito(c) {
   const list = state.data.creditos;
   const i = list.findIndex((x) => x.id === c.id);

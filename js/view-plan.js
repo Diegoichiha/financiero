@@ -108,6 +108,7 @@ function modalGastoRapido() {
     onSave: () => {
       const r = f.read();
       if (typeof r === 'string') return r;
+      if (r.financiado) { toast(r.financiado()); hooks.rerender(); return; }
       const mov = addMov(r);
       recordarCuenta('gasto', r.concepto, mov.cuentaId);
       toast(avisoCuenta('gasto', r.monto, mov.cuentaId) || 'Gasto registrado');

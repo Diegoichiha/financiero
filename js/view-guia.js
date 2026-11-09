@@ -74,6 +74,7 @@ export function renderGuia(root) {
       h('li', {}, 'Lo que pagas con una cuenta baja el saldo de esa cuenta y, con él, lo que puedes gastar. Si hoy ya pagaste el domicilio o el parqueadero de tu rutina, esa vez de hoy deja de esperarse: no se cuenta dos veces.'),
       h('li', {}, 'Cuando pasa un compromiso, pulsa "Ajustar gasto real" y escribe lo que realmente se gastó: lo que falta por registrar sale de la cuenta que elijas y el plan se ajusta.'),
       h('li', {}, 'Si en una compra (por ejemplo el mercado) venían cosas de un compromiso, usa "Atribuir parte de una compra" en ese compromiso: esa parte se cuenta al compromiso sin descontar de la cuenta otra vez.'),
+      h('li', {}, 'En Gastos, si la compra fue con la tarjeta de crédito o con ADDI, elígelo en "Medio de pago": el formulario pide cuotas, interés y (en ADDI) la fecha de pago, y las cuotas aparecen solas en "Falta por pagar".'),
       h('li', {}, 'Todo gasto pagado se descuenta solo de la cuenta que elegiste (si no eliges, de tu cuenta de siempre). Solo el efectivo y la tarjeta de crédito no descuentan de una cuenta.')));
 
   const cCuenta = h('section', { class: 'card w3' },
