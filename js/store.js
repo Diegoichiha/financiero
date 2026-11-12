@@ -260,6 +260,18 @@ function migrate(d) {
     d.config.migraciones.push('cuentas-hora-2026-11');
     cambio = true;
   }
+  if (!d.config.migraciones.includes('pagos-recurrentes-2026-11')) {
+    // Cada recurrente guarda su lista de pagos { dia, monto, con }. El pago automático pasa a ser un interruptor y la cuenta, la de cada pago.
+    for (const p of d.plantillas) {
+      if (p.dias || typeof p.autoPago === 'string') {
+        p.pagos = pagosDe(p).map((x) => ({ ...x }));
+        if (typeof p.autoPago === 'string') { for (const x of p.pagos) if (!x.con) x.con = p.autoPago; p.autoPago = true; }
+        delete p.dias;
+      }
+    }
+    d.config.migraciones.push('pagos-recurrentes-2026-11');
+    cambio = true;
+  }
   return cambio;
 }
 
@@ -427,7 +439,7 @@ export function ingresoMinimo(mes) {
       if (!p.auto || !centroOk(p.centro) || excl.has(`p:${p.id}|${mes}`) || rec.some((m) => m.plantillaId === p.id)) continue;
       const tj = tarjetaDe(p);
       const est = tj ? extractoPagadoEn(tj, mes).total : 0;
-      for (let k = 0; k < nPagosDe(p); k++) items.push({ concepto: nombrePago(p, k), monto: est > 0 ? est : (tj ? 0 : p.monto), categoria: p.categoria, centro: p.centro, tarjeta: tj || null, estado: 'pendiente', proyectado: true });
+      for (let k = 0; k < nPagosDe(p); k++) items.push({ concepto: nombrePago(p, k), monto: est > 0 ? est : (tj ? 0 : montoPago(p, k)), categoria: p.categoria, centro: p.centro, tarjeta: tj || null, estado: 'pendiente', proyectado: true });
     }
     // Cuotas de ADDI de ese mes que todavía no tienen su pago creado.
     for (const a of D.addi || []) {
@@ -663,6 +675,7 @@ export function updateMov(id, patch) {
     const antes = efectoMov(m);
     const cuentaAntes = m.cuentaId;
     Object.assign(m, patch);
+    if (m.estado !== 'pagado') quitarCompraTarjetaDe(m);
     if (m.estado === 'pagado' && m.cuentaId) { if (!antes || m.cuentaId !== cuentaAntes) marcarGmf(m); } else delete m.gmf;
     moverSaldo(antes, -1); // se deshace lo anterior…
     moverSaldo(efectoMov(m), +1); // …y se aplica lo nuevo
@@ -685,8 +698,16 @@ export function marcarPagado(id, pagado, cuentaId) {
     updateMov(id, { estado: 'pendiente', hora: '' });
   }
 }
+// Una compra de la tarjeta de crédito que nació de pagar este gasto con ella: se quita si el pago se deshace o se borra.
+function quitarCompraTarjetaDe(m) {
+  if (!m.tarjetaCompra) return;
+  const t = state.data.tarjetas.find((x) => x.id === m.tarjetaCompra.tid);
+  if (t) t.compras = t.compras.filter((c) => c.id !== m.tarjetaCompra.id);
+  delete m.tarjetaCompra;
+}
 export function delMov(id) {
   const m = state.data.movimientos.find((x) => x.id === id);
+  if (m) quitarCompraTarjetaDe(m);
   if (m) moverSaldo(efectoMov(m), -1);
   state.data.movimientos = state.data.movimientos.filter((x) => x.id !== id);
   save();
@@ -719,7 +740,22 @@ export function delIngreso(id) {
 // ---------- Recurrentes por mes ----------
 // Un recurrente se puede pagar VARIAS veces al mes (por ejemplo cada 15 días: días 1 y 16): `dias` = [1, 16]. Cada pago es un movimiento propio con su
 // `nPago` (0, 1…) y su monto; `dia` guarda el primero. Los pagos de tarjeta tienen un solo día.
-export const diasDe = (p) => (Array.isArray(p.dias) && p.dias.length ? p.dias : [p.dia || 1]);
+// `pagos` = [{ dia, monto, con }]: cada pago del mes con su día, su valor y la cuenta (id) o tarjeta ("@tc:<id>") con que se paga ('' = la elijo al pagar).
+export const pagosDe = (p) => {
+  if (Array.isArray(p.pagos) && p.pagos.length) return p.pagos;
+  if (Array.isArray(p.dias) && p.dias.length) return p.dias.map((dia) => ({ dia, monto: p.monto })); // formato anterior
+  return [{ dia: p.dia || 1, monto: p.monto }];
+};
+export const diasDe = (p) => pagosDe(p).map((x) => x.dia);
+export const montoPago = (p, k) => { const l = pagosDe(p); return l[Math.min(k, l.length - 1)].monto || p.monto; };
+export const conPago = (p, k) => { const l = pagosDe(p); return l[Math.min(k, l.length - 1)].con || ''; };
+// Cuenta de la que sale solo un pago con pago automático (si la tiene).
+export const cuentaAutoPago = (p, k) => {
+  if (!p || !p.autoPago) return '';
+  const con = conPago(p, k);
+  const id = con && !con.startsWith('@') ? con : (typeof p.autoPago === 'string' ? p.autoPago : '');
+  return state.data.cuentasDinero.some((c) => c.id === id) ? id : '';
+};
 export const nPagosDe = (p) => (p.tarjeta ? 1 : diasDe(p).length);
 export const nombrePago = (p, k) => (diasDe(p).length > 1 ? `${p.concepto} (${k + 1} de ${diasDe(p).length})` : p.concepto);
 export const instancias = (plantillaId, mes) => state.data.movimientos.filter((m) => m.plantillaId === plantillaId && m.mes === mes).sort((a, b) => (a.nPago || 0) - (b.nPago || 0));
@@ -736,7 +772,7 @@ function crearInstancia(p, mes, k = 0) {
   const tj = p.tarjeta && state.data.tarjetas.find((x) => x.id === p.tarjeta);
   const estimado = tj ? extractoPagadoEn(tj, mes).total : 0;
   const mov = {
-    id: uid(), fecha: fechaPlantilla(p, mes, k), concepto: nombrePago(p, k), monto: estimado > 0 ? estimado : (k > 0 && instancia(p.id, mes, 0)?.monto) || p.monto, tipo: 'recurrente', // el 2.º pago del mes parte del monto del 1.º
+    id: uid(), fecha: fechaPlantilla(p, mes, k), concepto: nombrePago(p, k), monto: estimado > 0 ? estimado : montoPago(p, k), tipo: 'recurrente',
     categoria: p.categoria, centro: p.centro, medio: '', nota: '', estado: 'pendiente', plantillaId: p.id, mes,
     ...(diasDe(p).length > 1 ? { nPago: k } : {}),
   };
@@ -809,9 +845,10 @@ export function sincronizarAutomaticos() {
   for (const m of D.movimientos) {
     if (m.estado !== 'pendiente' || !m.plantillaId || m.autoPagoHecho || m.fecha > hoy) continue;
     const p = D.plantillas.find((x) => x.id === m.plantillaId);
-    if (!p || !p.autoPago || !D.cuentasDinero.some((c) => c.id === p.autoPago)) continue;
-    updateMov(m.id, { estado: 'pagado', hora: '', cuentaId: p.autoPago, yaEnSaldo: undefined, autoPagoHecho: true });
-    pagadosSolos.push({ concepto: m.concepto, monto: m.monto, gmf: gmfDe(m), cuenta: cuentaDinero(p.autoPago).nombre });
+    const cuentaAuto = cuentaAutoPago(p, m.nPago || 0);
+    if (!cuentaAuto) continue;
+    updateMov(m.id, { estado: 'pagado', hora: '', cuentaId: cuentaAuto, yaEnSaldo: undefined, autoPagoHecho: true });
+    pagadosSolos.push({ concepto: m.concepto, monto: m.monto, gmf: gmfDe(m), cuenta: cuentaDinero(cuentaAuto).nombre });
     cambio = true;
   }
   if (pagadosSolos.length) state.avisoPagoAuto = pagadosSolos;
@@ -1257,12 +1294,26 @@ export function delPlanTarjeta(tid, id) {
 export function registrarCompraTarjeta(tid, { fecha, concepto, monto, cuotas = 1, tasaMV = 0, cuota = 0, categoria = 'otros-var', partes = 1 }) {
   const t = tarjetaById(tid);
   const corte = corteDeFecha(fecha, t);
+  const compraId = uid();
   if (cuotas > 1) {
     savePlanTarjeta(tid, { id: uid(), concepto, cuota, cuotas, pagadas: 0, corteRef: corteMasN(corte, t, -1), tasaMV, valor: monto, categoria });
   } else {
-    saveCompraTarjeta(tid, { id: uid(), fecha, concepto, monto, categoria, partes: partes > 1 ? partes : undefined });
+    saveCompraTarjeta(tid, { id: compraId, fecha, concepto, monto, categoria, partes: partes > 1 ? partes : undefined });
   }
-  return { corte, pago: pagoDeCorte(corte, t) };
+  return { corte, pago: pagoDeCorte(corte, t), compraId };
+}
+// Pagar un gasto pendiente CON la tarjeta de crédito: se agrega como compra de la tarjeta (entra en su extracto) y el gasto queda pagado sin descontar
+// de ninguna cuenta.
+export function pagarConTarjeta(id, tid) {
+  const m = state.data.movimientos.find((x) => x.id === id);
+  const t = tarjetaById(tid);
+  if (!m || !t) return null;
+  const r = registrarCompraTarjeta(tid, { fecha: todayISO(), concepto: m.concepto, monto: m.monto, categoria: m.categoria });
+  marcarPagado(id, true, '');
+  m.tarjetaCompra = { tid, id: r.compraId };
+  m.medio = 'Tarjeta ' + t.nombre;
+  save();
+  return { ...r, tarjeta: t };
 }
 
 // ---------- ADDI: compras en cuotas con interés que se pagan en fechas fijas ----------

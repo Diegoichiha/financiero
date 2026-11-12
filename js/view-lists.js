@@ -4,7 +4,7 @@ import {
 } from './util.js';
 import {
   state, TIPOS, TIPO, hooks, curMes, curRange, visibleMovs, visibleIngresos, sum, categoria, centroNombre, cuentaById, ordenPago, marcaPago,
-  instancia, instancias, diasDe, nombrePago, quitarPendientes, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
+  instancia, instancias, diasDe, pagosDe, conPago, nombrePago, quitarPendientes, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
   addMov, updateMov, delMov, addIngreso, updateIngreso, delIngreso, saveFuente, delFuente, save,
   planGasto, setEsperado, addEsperado, delEsperado, setCobros, cuentaSugerida, recordarCuenta,
   tarjetaById, registrarCompraTarjeta, registrarCompraAddi, fechaCuotaAddi, gmfDe,
@@ -29,36 +29,75 @@ const tipoDot = (t) => h('span', { class: 'row', style: { gap: '6px', flexWrap: 
 function editarPlantilla(p) {
   const nuevo = !p;
   p = p || { id: uid(), concepto: '', monto: 0, dia: null, categoria: 'servicios', centro: state.centro === 'todos' ? 'hogar' : state.centro, cuenta: '' };
+  const cuentas = state.data.cuentasDinero;
   const fConcepto = h('input', { type: 'text', value: p.concepto, placeholder: 'Ej. Netflix' });
-  const fMonto = moneyInput(p.monto);
-  const fDia = h('input', { type: 'text', value: p.dia || (p.dias || []).length ? diasDe(p).join(', ') : '', placeholder: 'Ej. 15  ·  cada 15 días: 1, 16', autocomplete: 'off' });
   const fCat = select(catOpts('recurrente'), p.categoria);
   const fCentro = select(centroOpts(), p.centro);
   const fTarjeta = select([{ value: '', label: 'No es pago de tarjeta' }, ...state.data.tarjetas.map((x) => ({ value: x.id, label: x.nombre }))], p.tarjeta || '');
   const fAuto = h('input', { type: 'checkbox', checked: !!p.auto });
-  const fAutoPago = select([{ value: '', label: 'No: lo marco pagado yo cuando pago' }, ...state.data.cuentasDinero.map((c) => ({ value: c.id, label: `Sí: se paga solo el día de pago, desde ${c.nombre}` }))], p.autoPago || '');
+  const fAutoPago = h('input', { type: 'checkbox', checked: !!p.autoPago });
   const fCuenta = select([{ value: '', label: 'Sin cuenta asociada' }, ...state.data.cuentas.map((c) => ({ value: c.id, label: `${c.proveedor} · ${c.referencia}` }))], p.cuenta || '');
+
+  // ---- Los pagos del mes: cada uno con su día, su valor y la cuenta o tarjeta con que se paga ----
+  const conOpts = [{ value: '', label: 'La elijo al pagar' }, ...cuentas.map((c) => ({ value: c.id, label: c.nombre })),
+    ...state.data.tarjetas.map((t) => ({ value: '@tc:' + t.id, label: `Tarjeta ${t.nombre} (crédito)` }))];
+  const pagos = nuevo ? [{ dia: null, monto: 0, con: '' }] : pagosDe(p).map((x) => ({ ...x }));
+  if (!nuevo && !Array.isArray(p.pagos) && !(p.dias || []).length && !p.dia) pagos[0].dia = null; // sin día definido
+  const titulo = h('div', { class: 'pagos-titulo' });
+  const lista = h('div', { class: 'pagos-lista' });
+  const btnAgregar = h('button', { type: 'button', class: 'btn sm', onclick: () => {
+    const ult = pagos[pagos.length - 1];
+    const dia = ult.dia ? (ult.dia <= 16 ? ult.dia + 15 : ult.dia - 15) : null; // por defecto, 15 días después
+    pagos.push({ dia, monto: ult.monto, con: ult.con || '' });
+    pintar();
+  } }, '+ Agregar otro pago');
+  function pintar() {
+    const n = pagos.length;
+    titulo.textContent = `Este pago se hace ${n === 1 ? '1 vez' : n + ' veces'} al mes`;
+    btnAgregar.style.display = fTarjeta.value || n >= 6 ? 'none' : '';
+    lista.replaceChildren(
+      h('div', { class: 'pago-fila pago-cab' }, h('span'), h('span', {}, 'Día'), h('span', {}, 'Valor'), h('span', {}, 'Se paga con'), h('span')),
+      ...pagos.map((x, i) => {
+        const dia = h('input', { type: 'number', min: 1, max: 31, value: x.dia || '', placeholder: 'Día', 'aria-label': `Día del pago ${i + 1}` });
+        dia.addEventListener('input', () => { x.dia = Number(dia.value) || null; });
+        const monto = moneyInput(x.monto, { 'aria-label': `Valor del pago ${i + 1}` });
+        monto.addEventListener('input', () => { x.monto = monto.getValue(); });
+        const con = select(conOpts, conOpts.some((o) => o.value === x.con) ? x.con : '', { 'aria-label': `Con qué se paga el pago ${i + 1}` });
+        con.addEventListener('change', () => { x.con = con.value; });
+        const quitar = n > 1
+          ? h('button', { type: 'button', class: 'btn ghost icon', title: 'Quitar este pago', 'aria-label': `Quitar el pago ${i + 1}`, onclick: () => { pagos.splice(i, 1); pintar(); } }, '✕')
+          : h('span');
+        return h('div', { class: 'pago-fila' }, h('b', {}, `Pago ${i + 1}`), dia, monto, con, quitar);
+      }));
+  }
+  fTarjeta.addEventListener('change', () => { if (fTarjeta.value && pagos.length > 1) pagos.length = 1; pintar(); });
+  pintar();
+
   modal(nuevo ? 'Nuevo pago recurrente' : 'Editar pago recurrente', [
-    field('Concepto', fConcepto, 'full'), field('Monto estimado de cada pago', fMonto), field('Día(s) de pago del mes (varios, separados por coma)', fDia),
-    field('Categoría', fCat), field('Centro', fCentro), field('Cuenta para pagar', fCuenta, 'full'), field('Pago de tarjeta (el monto sale de las compras y cuotas)', fTarjeta, 'full'),
-    h('label', { class: 'switch full' }, fAuto, 'Incluir automáticamente cada mes (como los créditos)'),
-    state.data.cuentasDinero.length ? field('Pago automático (para cobros que el banco hace solo, como la cuota de manejo)', fAutoPago, 'full') : null,
+    field('Concepto', fConcepto, 'full'), field('Categoría', fCat), field('Centro', fCentro),
+    h('div', { class: 'full' }, titulo, lista, btnAgregar),
+    cuentas.length ? h('label', { class: 'switch full' }, fAutoPago, 'Se paga solo ese día (el banco lo cobra automático y se descuenta de la cuenta del pago)') : null,
+    h('label', { class: 'switch full' }, fAuto, 'Incluir automáticamente cada mes'),
+    field('Pago de tarjeta (solo si este pago es el de una tarjeta: el valor sale de sus compras y cuotas)', fTarjeta, 'full'),
+    field('Número de cuenta del proveedor (para copiarlo al pagar)', fCuenta, 'full'),
   ], {
     onSave: () => {
       if (!fConcepto.value.trim()) return 'Escribe el concepto.';
-      if (!fMonto.getValue()) return 'Escribe el monto estimado.';
-      // Días de pago: uno ("15") o varios ("1, 16" = cada 15 días). Cada día es un pago del mes.
-      const textoDias = fDia.value.trim();
-      const dias = [...new Set(textoDias.split(/[\s,;y]+/).filter(Boolean).map(Number))];
-      if (dias.some((d) => !Number.isInteger(d) || d < 1 || d > 31)) return 'Los días de pago son números del 1 al 31, separados por coma (por ejemplo 1, 16).';
-      if (dias.length > 6) return 'Máximo 6 pagos al mes.';
-      dias.sort((a, b) => a - b);
-      if (fTarjeta.value && dias.length > 1) return 'El pago de una tarjeta tiene un solo día.';
-      const nueva = { ...p, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), dia: dias[0] || null, categoria: fCat.value, centro: fCentro.value, cuenta: fCuenta.value, tarjeta: fTarjeta.value };
-      if (dias.length > 1) nueva.dias = dias; else delete nueva.dias;
+      const n = pagos.length;
+      if (pagos.some((x) => !x.monto)) return n > 1 ? 'Escribe el valor de cada pago.' : 'Escribe el valor del pago.';
+      if (n > 1 && pagos.some((x) => !x.dia)) return 'Escribe el día de cada pago.';
+      if (n > 1 && new Set(pagos.map((x) => x.dia)).size !== n) return 'Cada pago del mes debe ser en un día distinto.';
+      if (fTarjeta.value && n > 1) return 'El pago de una tarjeta es uno solo al mes.';
+      if (fAutoPago.checked) {
+        if (pagos.some((x) => !x.dia)) return 'Para que se pague solo, escribe el día de cada pago.';
+        if (pagos.some((x) => !cuentas.some((c) => c.id === x.con))) return 'Para que se pague solo, elige en cada pago la cuenta de la que sale.';
+      }
+      const orden = [...pagos].sort((a, b) => (a.dia || 0) - (b.dia || 0));
+      const nueva = { ...p, concepto: fConcepto.value.trim(), monto: orden[0].monto, dia: orden[0].dia || null, categoria: fCat.value, centro: fCentro.value, cuenta: fCuenta.value, tarjeta: fTarjeta.value };
+      delete nueva.dias;
+      if (n > 1 || orden.some((x) => x.con)) nueva.pagos = orden.map((x) => ({ dia: x.dia, monto: x.monto, ...(x.con ? { con: x.con } : {}) })); else delete nueva.pagos;
       if (!nueva.tarjeta) delete nueva.tarjeta;
-      if (fAutoPago.value && !nueva.dia) return 'Para el pago automático escribe el día de pago.';
-      if (fAutoPago.value) nueva.autoPago = fAutoPago.value; else delete nueva.autoPago;
+      if (fAutoPago.checked) nueva.autoPago = true; else delete nueva.autoPago;
       nueva.auto = fAuto.checked || !!nueva.autoPago; // con pago automático el pago se incluye solo cada mes
       if (!nueva.auto) delete nueva.auto;
       savePlantilla(nueva);
@@ -126,6 +165,8 @@ export function renderRecurrentes(root) {
 
   // Una fila por cada pago del mes: un recurrente que se paga cada 15 días tiene dos filas (1 de 2, 2 de 2). La casilla (en la primera) incluye o
   // quita todos los pagos de ese mes.
+  // Con qué se paga un pago (cuenta o tarjeta), en palabras.
+  function conTxt(pl, k) { const c = conPago(pl, k); return c.startsWith('@tc:') ? (tarjetaById(c.slice(4))?.nombre || '') : (nombreCuenta(c) || ''); }
   function fila(pl, k = 0) {
     const inst = instancia(pl.id, mes, k);
     const todas = instancias(pl.id, mes);
@@ -144,12 +185,11 @@ export function renderRecurrentes(root) {
     const dia = h('input', { type: 'number', min: 1, max: 31, value: dias[k] || '', placeholder: '—', 'aria-label': 'Día de pago ' + (multi ? `${k + 1} de ` : 'de ') + pl.concepto });
     dia.addEventListener('change', () => {
       const nuevo = Math.min(31, Math.max(1, Number(dia.value))) || null;
-      if (multi) {
-        const lista = dias.slice();
-        lista[k] = nuevo || lista[k];
-        pl.dias = lista;
-        pl.dia = lista[0];
-      } else pl.dia = nuevo;
+      const lista = pagosDe(pl).map((x) => ({ ...x }));
+      if (nuevo) lista[k].dia = nuevo; else if (!multi) lista[0].dia = null;
+      delete pl.dias;
+      if (lista.length > 1 || lista.some((x) => x.con)) pl.pagos = lista; else delete pl.pagos;
+      pl.dia = lista[0].dia;
       const i = instancia(pl.id, mes, k);
       if (i && i.estado === 'pendiente') i.fecha = fechaPlantilla(pl, mes, k);
       save();
@@ -175,7 +215,13 @@ export function renderRecurrentes(root) {
         : h('span', { class: 'muted' }, 'No incluido'));
     return h('div', { class: 'rec-row' + (inst ? '' : ' off') },
       chk,
-      h('div', { class: 'nm' }, nombrePago(pl, k), h('small', {}, (categoria(pl.categoria)?.nombre || pl.categoria) + (pl.autoPago ? ' · se paga solo' : pl.auto ? ' · automático' : ''))),
+      h('div', { class: 'nm' }, k === 0 ? pl.concepto : h('span', { class: 'sub-pago' }, `↳ Pago ${k + 1} de ${dias.length}`),
+        h('small', {}, [
+          multi && k === 0 ? `Se paga ${dias.length} veces al mes` : null,
+          k === 0 ? (categoria(pl.categoria)?.nombre || pl.categoria) : pl.concepto,
+          conTxt(pl, k) ? 'con ' + conTxt(pl, k) : null,
+          pl.autoPago ? 'se paga solo' : pl.auto ? 'automático' : null,
+        ].filter(Boolean).join(' · '))),
       h('div', { class: 'acct' }, cu
         ? [h('span', {}, `${cu.proveedor} · ${cu.referencia}`), h('button', { class: 'btn ghost sm', title: 'Copiar número de cuenta', 'aria-label': 'Copiar número de cuenta ' + cu.referencia, onclick: () => copiar(cu.referencia) }, '⧉')]
         : h('span', { class: 'muted' }, '—')),

@@ -2,7 +2,7 @@
 // Un ingreso con cuenta SUMA a esa cuenta; un pago con cuenta RESTA. Se deshace solo al editar, borrar o volver a pendiente.
 import { h, money, dayShort, todayISO } from './util.js';
 import {
-  state, hooks, marcarPagado, cuentaSugerida, recordarCuenta, cuentaDinero, esMedioSinCuenta, sum, gmfDe,
+  state, hooks, marcarPagado, cuentaSugerida, recordarCuenta, cuentaDinero, esMedioSinCuenta, sum, gmfDe, conPago, pagarConTarjeta, tarjetaById,
 } from './store.js';
 import { modal, select, field, toast } from './ui.js';
 
@@ -11,10 +11,11 @@ export const hayCuentas = () => state.data.cuentasDinero.length > 0;
 export const nombreCuenta = (id) => (cuentaDinero(id) ? cuentaDinero(id).nombre : '');
 
 // Lista de cuentas (con su saldo de hoy) y la opción de no tocar ninguna.
-export function selectorCuenta(valor, tipo, ninguna) {
+export function selectorCuenta(valor, tipo, ninguna, conTarjetas = false) {
   const sinCuenta = ninguna || (tipo === 'ingreso' ? 'Ninguna: ya la tenía en mi saldo (no sumar)' : 'Ninguna: efectivo o tarjeta (no descontar)');
-  const opciones = [...state.data.cuentasDinero.map((c) => ({ value: c.id, label: `${c.nombre} · hoy ${money(c.saldo)}` })), { value: '', label: sinCuenta }];
-  return select(opciones, valor && cuentaDinero(valor) ? valor : '');
+  const tarjetas = conTarjetas ? state.data.tarjetas.map((t) => ({ value: '@tc:' + t.id, label: `Tarjeta ${t.nombre} (crédito)` })) : [];
+  const opciones = [...state.data.cuentasDinero.map((c) => ({ value: c.id, label: `${c.nombre} · hoy ${money(c.saldo)}` })), ...tarjetas, { value: '', label: sinCuenta }];
+  return select(opciones, valor && (cuentaDinero(valor) || tarjetas.some((t) => t.value === valor)) ? valor : '');
 }
 
 // Mensaje corto con el efecto que tuvo en la cuenta (se llama DESPUÉS de guardar).
@@ -31,14 +32,24 @@ export function avisoCuenta(tipo, monto, cuentaId, mov) {
 export function pagarMov(m, alTerminar) {
   const terminar = alTerminar || (() => hooks.rerender());
   if (!hayCuentas()) { marcarPagado(m.id, true); terminar(); return; }
-  const inicial = esMedioSinCuenta(m.medio) ? '' : (m.cuentaId && cuentaDinero(m.cuentaId) ? m.cuentaId : cuentaSugerida('gasto', m.concepto));
-  const sel = selectorCuenta(inicial, 'gasto');
-  modal(`¿De qué cuenta pagaste «${m.concepto}»?`, [
-    h('div', { class: 'card-sub full' }, `${money(m.monto)} · se descuenta de "Tengo hoy" en el Plan del mes.`),
-    field('Cuenta', sel, 'full'),
+  // Si el pago recurrente ya dice con qué se paga (una cuenta o la tarjeta), esa es la que se propone.
+  const pl = m.plantillaId && state.data.plantillas.find((x) => x.id === m.plantillaId);
+  const con = pl ? conPago(pl, m.nPago || 0) : '';
+  const inicial = con && (cuentaDinero(con) || (con.startsWith('@tc:') && tarjetaById(con.slice(4)))) ? con
+    : esMedioSinCuenta(m.medio) ? '' : (m.cuentaId && cuentaDinero(m.cuentaId) ? m.cuentaId : cuentaSugerida('gasto', m.concepto));
+  const sel = selectorCuenta(inicial, 'gasto', undefined, true);
+  modal(`¿Con qué pagaste «${m.concepto}»?`, [
+    h('div', { class: 'card-sub full' }, `${money(m.monto)} · si es una cuenta, se descuenta de "Tengo hoy"; si es la tarjeta, entra en su extracto.`),
+    field('Cuenta o tarjeta', sel, 'full'),
   ], {
     guardar: 'Marcar pagado',
     onSave: () => {
+      if (sel.value.startsWith('@tc:')) {
+        const r = pagarConTarjeta(m.id, sel.value.slice(4));
+        toast(r ? `Pagado con ${r.tarjeta.nombre}: entra en el extracto del corte ${dayShort(r.corte)} (se paga el ${dayShort(r.pago)})` : 'No se encontró la tarjeta');
+        terminar();
+        return;
+      }
       recordarCuenta('gasto', m.concepto, sel.value);
       marcarPagado(m.id, true, sel.value);
       toast(avisoCuenta('gasto', m.monto, sel.value, m) || 'Marcado como pagado');
@@ -51,7 +62,9 @@ export function pagarMov(m, alTerminar) {
 export function desmarcarPago(m, alTerminar) {
   const c = cuentaDinero(m.cuentaId);
   const devuelto = m.monto + gmfDe(m); // incluye el 4x1000 si lo llevaba
-  marcarPagado(m.id, false);
+  const eraTarjeta = !!m.tarjetaCompra;
+  marcarPagado(m.id, false); // si se había pagado con la tarjeta, también se quita esa compra
+  if (eraTarjeta) { toast('Vuelto a pendiente: se quitó la compra de la tarjeta'); (alTerminar || (() => hooks.rerender()))(); return; }
   toast(c ? `Se devolvieron ${money(devuelto)} a ${c.nombre} · ahora tiene ${money(c.saldo)}` : 'Vuelto a pendiente');
   (alTerminar || (() => hooks.rerender()))();
 }
