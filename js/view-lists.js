@@ -4,7 +4,7 @@ import {
 } from './util.js';
 import {
   state, TIPOS, TIPO, hooks, curMes, curRange, visibleMovs, visibleIngresos, sum, categoria, centroNombre, cuentaById, ordenPago, marcaPago,
-  instancia, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
+  instancia, instancias, diasDe, nombrePago, quitarPendientes, incluirPlantilla, quitarPlantilla, fechaPlantilla, savePlantilla, delPlantilla, marcarPagado, ingresoMinimo,
   addMov, updateMov, delMov, addIngreso, updateIngreso, delIngreso, saveFuente, delFuente, save,
   planGasto, setEsperado, addEsperado, delEsperado, setCobros, cuentaSugerida, recordarCuenta,
   tarjetaById, registrarCompraTarjeta, registrarCompraAddi, fechaCuotaAddi, gmfDe,
@@ -31,7 +31,7 @@ function editarPlantilla(p) {
   p = p || { id: uid(), concepto: '', monto: 0, dia: null, categoria: 'servicios', centro: state.centro === 'todos' ? 'hogar' : state.centro, cuenta: '' };
   const fConcepto = h('input', { type: 'text', value: p.concepto, placeholder: 'Ej. Netflix' });
   const fMonto = moneyInput(p.monto);
-  const fDia = h('input', { type: 'number', min: 1, max: 31, value: p.dia || '', placeholder: 'Día del mes' });
+  const fDia = h('input', { type: 'text', value: p.dia || (p.dias || []).length ? diasDe(p).join(', ') : '', placeholder: 'Ej. 15  ·  cada 15 días: 1, 16', autocomplete: 'off' });
   const fCat = select(catOpts('recurrente'), p.categoria);
   const fCentro = select(centroOpts(), p.centro);
   const fTarjeta = select([{ value: '', label: 'No es pago de tarjeta' }, ...state.data.tarjetas.map((x) => ({ value: x.id, label: x.nombre }))], p.tarjeta || '');
@@ -39,7 +39,7 @@ function editarPlantilla(p) {
   const fAutoPago = select([{ value: '', label: 'No: lo marco pagado yo cuando pago' }, ...state.data.cuentasDinero.map((c) => ({ value: c.id, label: `Sí: se paga solo el día de pago, desde ${c.nombre}` }))], p.autoPago || '');
   const fCuenta = select([{ value: '', label: 'Sin cuenta asociada' }, ...state.data.cuentas.map((c) => ({ value: c.id, label: `${c.proveedor} · ${c.referencia}` }))], p.cuenta || '');
   modal(nuevo ? 'Nuevo pago recurrente' : 'Editar pago recurrente', [
-    field('Concepto', fConcepto, 'full'), field('Monto estimado', fMonto), field('Día de pago (opcional)', fDia),
+    field('Concepto', fConcepto, 'full'), field('Monto estimado de cada pago', fMonto), field('Día(s) de pago del mes (varios, separados por coma)', fDia),
     field('Categoría', fCat), field('Centro', fCentro), field('Cuenta para pagar', fCuenta, 'full'), field('Pago de tarjeta (el monto sale de las compras y cuotas)', fTarjeta, 'full'),
     h('label', { class: 'switch full' }, fAuto, 'Incluir automáticamente cada mes (como los créditos)'),
     state.data.cuentasDinero.length ? field('Pago automático (para cobros que el banco hace solo, como la cuota de manejo)', fAutoPago, 'full') : null,
@@ -47,7 +47,15 @@ function editarPlantilla(p) {
     onSave: () => {
       if (!fConcepto.value.trim()) return 'Escribe el concepto.';
       if (!fMonto.getValue()) return 'Escribe el monto estimado.';
-      const nueva = { ...p, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), dia: Number(fDia.value) || null, categoria: fCat.value, centro: fCentro.value, cuenta: fCuenta.value, tarjeta: fTarjeta.value };
+      // Días de pago: uno ("15") o varios ("1, 16" = cada 15 días). Cada día es un pago del mes.
+      const textoDias = fDia.value.trim();
+      const dias = [...new Set(textoDias.split(/[\s,;y]+/).filter(Boolean).map(Number))];
+      if (dias.some((d) => !Number.isInteger(d) || d < 1 || d > 31)) return 'Los días de pago son números del 1 al 31, separados por coma (por ejemplo 1, 16).';
+      if (dias.length > 6) return 'Máximo 6 pagos al mes.';
+      dias.sort((a, b) => a - b);
+      if (fTarjeta.value && dias.length > 1) return 'El pago de una tarjeta tiene un solo día.';
+      const nueva = { ...p, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), dia: dias[0] || null, categoria: fCat.value, centro: fCentro.value, cuenta: fCuenta.value, tarjeta: fTarjeta.value };
+      if (dias.length > 1) nueva.dias = dias; else delete nueva.dias;
       if (!nueva.tarjeta) delete nueva.tarjeta;
       if (fAutoPago.value && !nueva.dia) return 'Para el pago automático escribe el día de pago.';
       if (fAutoPago.value) nueva.autoPago = fAutoPago.value; else delete nueva.autoPago;
@@ -67,10 +75,10 @@ export function renderRecurrentes(root) {
   const resumen = h('section', { class: 'card' });
 
   const stats = () => {
-    const inst = plantillas.map((pl) => instancia(pl.id, mes)).filter(Boolean);
+    const inst = plantillas.flatMap((pl) => instancias(pl.id, mes));
     const total = sum(inst);
     const pagado = sum(inst.filter((m) => m.estado === 'pagado'));
-    return { n: inst.length, total, pagado, pend: total - pagado };
+    return { n: plantillas.filter((pl) => instancias(pl.id, mes).length).length, total, pagado, pend: total - pagado };
   };
   const pintarResumen = () => {
     const st = stats();
@@ -88,16 +96,16 @@ export function renderRecurrentes(root) {
           h('button', { class: 'btn', onclick: () => { plantillas.forEach((pl) => incluirPlantilla(pl, mes)); hooks.rerender(); } }, 'Incluir todos'),
           h('button', { class: 'btn', title: 'Incluye los que tenías el mes anterior', onclick: () => {
             const prev = addMonths(mesIni, -1).slice(0, 7);
-            const antes = plantillas.filter((pl) => instancia(pl.id, prev));
+            const antes = plantillas.filter((pl) => instancias(pl.id, prev).length);
             if (!antes.length) { toast('El mes anterior no tiene recurrentes incluidos'); return; }
             antes.forEach((pl) => incluirPlantilla(pl, mes));
             hooks.rerender();
           } }, 'Copiar del mes anterior'),
           h('button', { class: 'btn', onclick: async () => {
-            const pend = plantillas.map((pl) => instancia(pl.id, mes)).filter((m) => m && m.estado === 'pendiente');
+            const pend = plantillas.flatMap((pl) => instancias(pl.id, mes)).filter((m) => m.estado === 'pendiente');
             if (!pend.length) { toast('No hay pendientes para quitar'); return; }
             if (!(await confirmar(`Quitar ${pend.length} recurrentes pendientes de este mes? Los ya pagados se conservan.`, 'Quitar'))) return;
-            plantillas.forEach((pl) => { const m = instancia(pl.id, mes); if (m && m.estado === 'pendiente') quitarPlantilla(pl, mes); });
+            plantillas.forEach((pl) => { if (instancias(pl.id, mes).some((m) => m.estado === 'pendiente')) quitarPendientes(pl, mes); });
             hooks.rerender();
           } }, 'Quitar pendientes'),
           h('button', { class: 'btn primary', onclick: () => editarPlantilla() }, '+ Nuevo recurrente'))),
@@ -109,31 +117,44 @@ export function renderRecurrentes(root) {
   const bloques = grupos.map((c) => {
     const lista = plantillas.filter((pl) => pl.centro === c.id);
     if (!lista.length) return null;
-    const inc = lista.filter((pl) => instancia(pl.id, mes)).length;
+    const inc = lista.filter((pl) => instancias(pl.id, mes).length).length;
     return h('section', { class: 'card rec-group' },
       h('h3', {}, c.nombre, h('span', { class: 'muted' }, `${inc} de ${lista.length} incluidos este mes`)),
       h('div', { class: 'rec-row rec-head' }, h('span'), h('span', {}, 'Concepto'), h('span', {}, 'Cuenta para pagar'), h('span', {}, 'Día'), h('span', {}, 'Monto'), h('span', {}, 'Estado'), h('span')),
-      lista.map((pl) => fila(pl)));
+      lista.flatMap((pl) => diasDe(pl).slice(0, pl.tarjeta ? 1 : 6).map((_, k) => fila(pl, k))));
   }).filter(Boolean);
 
-  function fila(pl) {
-    const inst = instancia(pl.id, mes);
+  // Una fila por cada pago del mes: un recurrente que se paga cada 15 días tiene dos filas (1 de 2, 2 de 2). La casilla (en la primera) incluye o
+  // quita todos los pagos de ese mes.
+  function fila(pl, k = 0) {
+    const inst = instancia(pl.id, mes, k);
+    const todas = instancias(pl.id, mes);
+    const dias = diasDe(pl);
+    const multi = dias.length > 1;
     const cu = pl.cuenta && cuentaById(pl.cuenta);
-    const chk = h('input', { type: 'checkbox', checked: !!inst, 'aria-label': 'Incluir ' + pl.concepto + ' este mes' });
-    chk.addEventListener('change', async () => {
-      if (chk.checked) { incluirPlantilla(pl, mes); hooks.rerender(); return; }
-      if (inst && inst.estado === 'pagado' && !(await confirmar(`"${pl.concepto}" ya está marcado como pagado. ¿Quitarlo de este mes?`, 'Quitar'))) { chk.checked = true; return; }
-      quitarPlantilla(pl, mes);
-      hooks.rerender();
-    });
-    const dia = h('input', { type: 'number', min: 1, max: 31, value: pl.dia || '', placeholder: '—', 'aria-label': 'Día de pago de ' + pl.concepto });
+    const chk = k === 0 ? h('input', { type: 'checkbox', checked: todas.length > 0, 'aria-label': 'Incluir ' + pl.concepto + ' este mes' }) : h('span');
+    if (k === 0) {
+      chk.addEventListener('change', async () => {
+        if (chk.checked) { incluirPlantilla(pl, mes); hooks.rerender(); return; }
+        if (todas.some((m) => m.estado === 'pagado') && !(await confirmar(`"${pl.concepto}" ya tiene pagos marcados como pagados. ¿Quitarlo de este mes?`, 'Quitar'))) { chk.checked = true; return; }
+        quitarPlantilla(pl, mes);
+        hooks.rerender();
+      });
+    }
+    const dia = h('input', { type: 'number', min: 1, max: 31, value: dias[k] || '', placeholder: '—', 'aria-label': 'Día de pago ' + (multi ? `${k + 1} de ` : 'de ') + pl.concepto });
     dia.addEventListener('change', () => {
-      pl.dia = Math.min(31, Math.max(1, Number(dia.value))) || null;
-      const i = instancia(pl.id, mes);
-      if (i && i.estado === 'pendiente') i.fecha = fechaPlantilla(pl, mes);
+      const nuevo = Math.min(31, Math.max(1, Number(dia.value))) || null;
+      if (multi) {
+        const lista = dias.slice();
+        lista[k] = nuevo || lista[k];
+        pl.dias = lista;
+        pl.dia = lista[0];
+      } else pl.dia = nuevo;
+      const i = instancia(pl.id, mes, k);
+      if (i && i.estado === 'pendiente') i.fecha = fechaPlantilla(pl, mes, k);
       save();
     });
-    const monto = moneyInput(inst ? inst.monto : pl.monto, { class: 'mny', 'aria-label': 'Monto de ' + pl.concepto });
+    const monto = moneyInput(inst ? inst.monto : pl.monto, { class: 'mny', 'aria-label': 'Monto de ' + nombrePago(pl, k) });
     monto.disabled = !inst;
     // Si es el pago de una tarjeta, el monto sugerido sale del extracto que se paga ese mes.
     const tj = pl.tarjeta && state.data.tarjetas.find((x) => x.id === pl.tarjeta);
@@ -149,10 +170,12 @@ export function renderRecurrentes(root) {
       ? h('button', { class: 'btn paid-btn' + (inst.estado === 'pagado' ? ' is-paid' : ''), title: inst.estado === 'pagado' ? 'Clic para volver a pendiente' : 'Marcar como pagado',
         onclick: () => { if (inst.estado === 'pagado') desmarcarPago(inst); else pagarMov(inst); } },
       inst.estado === 'pagado' ? `Pagado ✓ ${dayShort(inst.fecha)}` : 'Marcar pagado')
-      : h('span', { class: 'muted' }, 'No incluido');
+      : (todas.length
+        ? h('button', { class: 'btn ghost sm', title: 'Incluir este pago en el mes', onclick: () => { incluirPlantilla(pl, mes); hooks.rerender(); } }, 'Incluir este pago')
+        : h('span', { class: 'muted' }, 'No incluido'));
     return h('div', { class: 'rec-row' + (inst ? '' : ' off') },
       chk,
-      h('div', { class: 'nm' }, pl.concepto, h('small', {}, (categoria(pl.categoria)?.nombre || pl.categoria) + (pl.autoPago ? ' · se paga solo' : pl.auto ? ' · automático' : ''))),
+      h('div', { class: 'nm' }, nombrePago(pl, k), h('small', {}, (categoria(pl.categoria)?.nombre || pl.categoria) + (pl.autoPago ? ' · se paga solo' : pl.auto ? ' · automático' : ''))),
       h('div', { class: 'acct' }, cu
         ? [h('span', {}, `${cu.proveedor} · ${cu.referencia}`), h('button', { class: 'btn ghost sm', title: 'Copiar número de cuenta', 'aria-label': 'Copiar número de cuenta ' + cu.referencia, onclick: () => copiar(cu.referencia) }, '⧉')]
         : h('span', { class: 'muted' }, '—')),

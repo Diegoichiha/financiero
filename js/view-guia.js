@@ -75,6 +75,7 @@ export function renderGuia(root) {
       h('li', {}, 'Cuando pasa un compromiso, pulsa "Ajustar gasto real" y escribe lo que realmente se gastó: lo que falta por registrar sale de la cuenta que elijas y el plan se ajusta.'),
       h('li', {}, 'Si en una compra (por ejemplo el mercado) venían cosas de un compromiso, usa "Atribuir parte de una compra" en ese compromiso: esa parte se cuenta al compromiso sin descontar de la cuenta otra vez.'),
       h('li', {}, 'En Gastos, si la compra fue con la tarjeta de crédito o con ADDI, elígelo en "Medio de pago": el formulario pide cuotas, interés y (en ADDI) la fecha de pago, y las cuotas aparecen solas en "Falta por pagar".'),
+      h('li', {}, 'Si un recurrente se paga más de una vez al mes (el servicio doméstico, la peluquería… cada 15 días), con su ✎ en Recurrentes escribe todos los días de pago, por ejemplo "1, 16": aparece una fila por cada pago.'),
       h('li', {}, 'La cuota de manejo de Bancolombia ($15.900, el día 12) se paga sola cada mes desde esa cuenta. A cualquier pago recurrente le puedes poner "pago automático" con su ✎ en Recurrentes.'),
       h('li', {}, 'Todo gasto pagado se descuenta solo de la cuenta que elegiste (si no eliges, de tu cuenta de siempre). Solo el efectivo y la tarjeta de crédito no descuentan de una cuenta.')));
 

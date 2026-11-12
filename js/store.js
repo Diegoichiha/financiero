@@ -427,7 +427,7 @@ export function ingresoMinimo(mes) {
       if (!p.auto || !centroOk(p.centro) || excl.has(`p:${p.id}|${mes}`) || rec.some((m) => m.plantillaId === p.id)) continue;
       const tj = tarjetaDe(p);
       const est = tj ? extractoPagadoEn(tj, mes).total : 0;
-      items.push({ concepto: p.concepto, monto: est > 0 ? est : (tj ? 0 : p.monto), categoria: p.categoria, centro: p.centro, tarjeta: tj || null, estado: 'pendiente', proyectado: true });
+      for (let k = 0; k < nPagosDe(p); k++) items.push({ concepto: nombrePago(p, k), monto: est > 0 ? est : (tj ? 0 : p.monto), categoria: p.categoria, centro: p.centro, tarjeta: tj || null, estado: 'pendiente', proyectado: true });
     }
     // Cuotas de ADDI de ese mes que todavía no tienen su pago creado.
     for (const a of D.addi || []) {
@@ -717,29 +717,45 @@ export function delIngreso(id) {
 }
 
 // ---------- Recurrentes por mes ----------
-export const instancia = (plantillaId, mes) =>
-  state.data.movimientos.find((m) => m.plantillaId === plantillaId && m.mes === mes);
+// Un recurrente se puede pagar VARIAS veces al mes (por ejemplo cada 15 días: días 1 y 16): `dias` = [1, 16]. Cada pago es un movimiento propio con su
+// `nPago` (0, 1…) y su monto; `dia` guarda el primero. Los pagos de tarjeta tienen un solo día.
+export const diasDe = (p) => (Array.isArray(p.dias) && p.dias.length ? p.dias : [p.dia || 1]);
+export const nPagosDe = (p) => (p.tarjeta ? 1 : diasDe(p).length);
+export const nombrePago = (p, k) => (diasDe(p).length > 1 ? `${p.concepto} (${k + 1} de ${diasDe(p).length})` : p.concepto);
+export const instancias = (plantillaId, mes) => state.data.movimientos.filter((m) => m.plantillaId === plantillaId && m.mes === mes).sort((a, b) => (a.nPago || 0) - (b.nPago || 0));
+export const instancia = (plantillaId, mes, k = 0) =>
+  state.data.movimientos.find((m) => m.plantillaId === plantillaId && m.mes === mes && (m.nPago || 0) === k);
 
-export function fechaPlantilla(p, mes) {
+export function fechaPlantilla(p, mes, k = 0) {
+  const dias = diasDe(p);
   const dim = daysInMonth(mes + '-01');
-  return `${mes}-${pad(Math.min(Math.max(p.dia || 1, 1), dim))}`;
+  return `${mes}-${pad(Math.min(Math.max(dias[Math.min(k, dias.length - 1)] || 1, 1), dim))}`;
 }
 
-function crearInstancia(p, mes) {
+function crearInstancia(p, mes, k = 0) {
   const tj = p.tarjeta && state.data.tarjetas.find((x) => x.id === p.tarjeta);
   const estimado = tj ? extractoPagadoEn(tj, mes).total : 0;
   const mov = {
-    id: uid(), fecha: fechaPlantilla(p, mes), concepto: p.concepto, monto: estimado > 0 ? estimado : p.monto, tipo: 'recurrente',
+    id: uid(), fecha: fechaPlantilla(p, mes, k), concepto: nombrePago(p, k), monto: estimado > 0 ? estimado : (k > 0 && instancia(p.id, mes, 0)?.monto) || p.monto, tipo: 'recurrente', // el 2.º pago del mes parte del monto del 1.º
     categoria: p.categoria, centro: p.centro, medio: '', nota: '', estado: 'pendiente', plantillaId: p.id, mes,
+    ...(diasDe(p).length > 1 ? { nPago: k } : {}),
   };
   state.data.movimientos.push(mov);
   return mov;
 }
 
 export function incluirPlantilla(p, mes) {
-  if (instancia(p.id, mes)) return;
-  crearInstancia(p, mes);
+  let creado = false;
+  for (let k = 0; k < nPagosDe(p); k++) if (!instancia(p.id, mes, k)) { crearInstancia(p, mes, k); creado = true; }
+  if (!creado) return;
   state.data.config.autoExcluidos = state.data.config.autoExcluidos.filter((k) => k !== `p:${p.id}|${mes}`);
+  save();
+}
+// Quita solo los pagos pendientes del mes (los ya pagados se conservan).
+export function quitarPendientes(p, mes) {
+  state.data.movimientos = state.data.movimientos.filter((m) => !(m.plantillaId === p.id && m.mes === mes && m.estado === 'pendiente'));
+  // En los automáticos se anota que ese mes se quitaron, para que no vuelvan a aparecer solos (los ya pagados se conservan).
+  if (p.auto && !state.data.config.autoExcluidos.includes(`p:${p.id}|${mes}`)) state.data.config.autoExcluidos.push(`p:${p.id}|${mes}`);
   save();
 }
 
@@ -764,9 +780,12 @@ export function sincronizarAutomaticos() {
   const excl = new Set(D.config.autoExcluidos);
   for (const mes of [hoy.slice(0, 7), addMonths(hoy, 1).slice(0, 7)]) {
     for (const p of D.plantillas) {
-      if (!p.auto || excl.has(`p:${p.id}|${mes}`) || instancia(p.id, mes)) continue;
-      crearInstancia(p, mes);
-      cambio = true;
+      if (!p.auto || excl.has(`p:${p.id}|${mes}`)) continue;
+      for (let k = 0; k < nPagosDe(p); k++) {
+        if (instancia(p.id, mes, k)) continue;
+        crearInstancia(p, mes, k);
+        cambio = true;
+      }
     }
     for (const fu of D.fuentesIngreso) {
       if (fu.tipo !== 'recurrente' || (fu.hasta && mes > fu.hasta) || excl.has(`f:${fu.id}|${mes}`) || D.planIngresos.some((r) => r.mes === mes && r.fuenteId === fu.id)) continue;
@@ -1322,7 +1341,31 @@ export function delCredito(id) {
 export function savePlantilla(p) {
   const list = state.data.plantillas;
   const i = list.findIndex((x) => x.id === p.id);
+  const diasAntes = i >= 0 ? diasDe(list[i]) : null;
   if (i >= 0) list[i] = p; else list.push(p);
+  if (diasAntes && JSON.stringify(diasAntes) !== JSON.stringify(diasDe(p))) {
+    // Cambiaron los días de pago: los pagos pendientes siguen la nueva configuración (cada uno toma el pago cuyo día coincide con el suyo, o el
+    // siguiente libre; los que sobran se quitan). Los ya pagados no se tocan.
+    const n = nPagosDe(p);
+    const dias = diasDe(p);
+    const quitar = new Set();
+    const meses = [...new Set(state.data.movimientos.filter((m) => m.plantillaId === p.id).map((m) => m.mes))];
+    for (const mes of meses) {
+      const delMes = state.data.movimientos.filter((m) => m.plantillaId === p.id && m.mes === mes);
+      const ocupados = new Set(delMes.filter((m) => m.estado !== 'pendiente').map((m) => m.nPago || 0));
+      for (const m of delMes.filter((x) => x.estado === 'pendiente')) {
+        const dia = Number(m.fecha.slice(8));
+        let k = dias.findIndex((d, j) => j < n && d === dia && !ocupados.has(j));
+        if (k < 0) k = dias.findIndex((_, j) => j < n && !ocupados.has(j));
+        if (k < 0) { quitar.add(m); continue; }
+        ocupados.add(k);
+        m.fecha = fechaPlantilla(p, mes, k);
+        m.concepto = nombrePago(p, k);
+        if (dias.length > 1) m.nPago = k; else delete m.nPago;
+      }
+    }
+    state.data.movimientos = state.data.movimientos.filter((m) => !quitar.has(m));
+  }
   save();
 }
 export function delPlantilla(id) {
