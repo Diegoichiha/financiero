@@ -272,6 +272,19 @@ function migrate(d) {
     d.config.migraciones.push('pagos-recurrentes-2026-11');
     cambio = true;
   }
+  if (!d.config.migraciones.includes('pagos-valores-2026-11')) {
+    // Los recurrentes con varios pagos ya guardados: sus pagos pendientes toman el valor que dice el editor.
+    for (const p of d.plantillas) {
+      if (!Array.isArray(p.pagos) || p.pagos.length < 2 || p.tarjeta) continue;
+      for (const m of d.movimientos) {
+        if (m.plantillaId !== p.id || m.estado !== 'pendiente' || m.montoManual) continue;
+        const v = montoPago(p, m.nPago || 0);
+        if (v) m.monto = v;
+      }
+    }
+    d.config.migraciones.push('pagos-valores-2026-11');
+    cambio = true;
+  }
   return cambio;
 }
 
@@ -749,13 +762,6 @@ export const pagosDe = (p) => {
 export const diasDe = (p) => pagosDe(p).map((x) => x.dia);
 export const montoPago = (p, k) => { const l = pagosDe(p); return l[Math.min(k, l.length - 1)].monto || p.monto; };
 export const conPago = (p, k) => { const l = pagosDe(p); return l[Math.min(k, l.length - 1)].con || ''; };
-// Cuenta de la que sale solo un pago con pago automático (si la tiene).
-export const cuentaAutoPago = (p, k) => {
-  if (!p || !p.autoPago) return '';
-  const con = conPago(p, k);
-  const id = con && !con.startsWith('@') ? con : (typeof p.autoPago === 'string' ? p.autoPago : '');
-  return state.data.cuentasDinero.some((c) => c.id === id) ? id : '';
-};
 export const nPagosDe = (p) => (p.tarjeta ? 1 : diasDe(p).length);
 export const nombrePago = (p, k) => (diasDe(p).length > 1 ? `${p.concepto} (${k + 1} de ${diasDe(p).length})` : p.concepto);
 export const instancias = (plantillaId, mes) => state.data.movimientos.filter((m) => m.plantillaId === plantillaId && m.mes === mes).sort((a, b) => (a.nPago || 0) - (b.nPago || 0));
@@ -839,17 +845,26 @@ export function sincronizarAutomaticos() {
       cambio = true;
     }
   }
-  // Pagos recurrentes con pago automático (p. ej. cuotas de manejo): llegado el día, quedan pagados y salen de su cuenta. Una sola vez: si los
-  // devuelves a pendiente, no se vuelven a pagar solos.
+  // Pagos recurrentes con "Se paga con" (una cuenta o la tarjeta): llegado el día, quedan pagados solos y salen de esa cuenta (o entran como compra de
+  // la tarjeta). Una sola vez por pago, y solo del mes en curso en adelante: si los devuelves a pendiente, no se repiten. Los que se eligen al pagar
+  // ("La elijo al pagar") y los pagos de tarjeta siguen siendo manuales.
   const pagadosSolos = [];
   for (const m of D.movimientos) {
-    if (m.estado !== 'pendiente' || !m.plantillaId || m.autoPagoHecho || m.fecha > hoy) continue;
+    if (m.estado !== 'pendiente' || !m.plantillaId || m.autoPagoHecho || m.fecha > hoy || (m.mes || m.fecha.slice(0, 7)) < hoy.slice(0, 7)) continue;
     const p = D.plantillas.find((x) => x.id === m.plantillaId);
-    const cuentaAuto = cuentaAutoPago(p, m.nPago || 0);
-    if (!cuentaAuto) continue;
-    updateMov(m.id, { estado: 'pagado', hora: '', cuentaId: cuentaAuto, yaEnSaldo: undefined, autoPagoHecho: true });
-    pagadosSolos.push({ concepto: m.concepto, monto: m.monto, gmf: gmfDe(m), cuenta: cuentaDinero(cuentaAuto).nombre });
-    cambio = true;
+    if (!p || p.tarjeta) continue;
+    const con = conPago(p, m.nPago || 0) || (typeof p.autoPago === 'string' ? p.autoPago : '');
+    if (con.startsWith('@tc:')) {
+      const t = tarjetaById(con.slice(4));
+      if (!t) continue;
+      pagarConTarjeta(m.id, t.id, { fecha: m.fecha, auto: true });
+      pagadosSolos.push({ concepto: m.concepto, monto: m.monto, gmf: 0, cuenta: t.nombre });
+      cambio = true;
+    } else if (D.cuentasDinero.some((c) => c.id === con)) {
+      updateMov(m.id, { estado: 'pagado', hora: '', cuentaId: con, yaEnSaldo: undefined, autoPagoHecho: true });
+      pagadosSolos.push({ concepto: m.concepto, monto: m.monto, gmf: gmfDe(m), cuenta: cuentaDinero(con).nombre });
+      cambio = true;
+    }
   }
   if (pagadosSolos.length) state.avisoPagoAuto = pagadosSolos;
   if (sincronizarGastosReales()) cambio = true;
@@ -1304,12 +1319,13 @@ export function registrarCompraTarjeta(tid, { fecha, concepto, monto, cuotas = 1
 }
 // Pagar un gasto pendiente CON la tarjeta de crédito: se agrega como compra de la tarjeta (entra en su extracto) y el gasto queda pagado sin descontar
 // de ninguna cuenta.
-export function pagarConTarjeta(id, tid) {
+export function pagarConTarjeta(id, tid, { fecha, auto = false } = {}) {
   const m = state.data.movimientos.find((x) => x.id === id);
   const t = tarjetaById(tid);
   if (!m || !t) return null;
-  const r = registrarCompraTarjeta(tid, { fecha: todayISO(), concepto: m.concepto, monto: m.monto, categoria: m.categoria });
-  marcarPagado(id, true, '');
+  const r = registrarCompraTarjeta(tid, { fecha: fecha || todayISO(), concepto: m.concepto, monto: m.monto, categoria: m.categoria });
+  if (auto) updateMov(id, { estado: 'pagado', hora: '', cuentaId: undefined, yaEnSaldo: true, autoPagoHecho: true });
+  else marcarPagado(id, true, '');
   m.tarjetaCompra = { tid, id: r.compraId };
   m.medio = 'Tarjeta ' + t.nombre;
   save();
@@ -1417,7 +1433,20 @@ export function savePlantilla(p) {
     }
     state.data.movimientos = state.data.movimientos.filter((m) => !quitar.has(m));
   }
+  alinearValoresPendientes(p);
   save();
+}
+// El valor de cada pago PENDIENTE de un recurrente sigue al que dice su catálogo (los pagos de tarjeta siguen sus compras; los que ajustaste a mano
+// en la fila de Recurrentes se respetan).
+function alinearValoresPendientes(p) {
+  if (p.tarjeta) return false;
+  let cambio = false;
+  for (const m of state.data.movimientos) {
+    if (m.plantillaId !== p.id || m.estado !== 'pendiente' || m.montoManual) continue;
+    const v = montoPago(p, m.nPago || 0);
+    if (v && Math.round(m.monto) !== Math.round(v)) { m.monto = v; cambio = true; }
+  }
+  return cambio;
 }
 export function delPlantilla(id) {
   state.data.plantillas = state.data.plantillas.filter((p) => p.id !== id);

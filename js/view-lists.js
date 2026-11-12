@@ -35,7 +35,6 @@ function editarPlantilla(p) {
   const fCentro = select(centroOpts(), p.centro);
   const fTarjeta = select([{ value: '', label: 'No es pago de tarjeta' }, ...state.data.tarjetas.map((x) => ({ value: x.id, label: x.nombre }))], p.tarjeta || '');
   const fAuto = h('input', { type: 'checkbox', checked: !!p.auto });
-  const fAutoPago = h('input', { type: 'checkbox', checked: !!p.autoPago });
   const fCuenta = select([{ value: '', label: 'Sin cuenta asociada' }, ...state.data.cuentas.map((c) => ({ value: c.id, label: `${c.proveedor} · ${c.referencia}` }))], p.cuenta || '');
 
   // ---- Los pagos del mes: cada uno con su día, su valor y la cuenta o tarjeta con que se paga ----
@@ -75,8 +74,8 @@ function editarPlantilla(p) {
 
   modal(nuevo ? 'Nuevo pago recurrente' : 'Editar pago recurrente', [
     field('Concepto', fConcepto, 'full'), field('Categoría', fCat), field('Centro', fCentro),
-    h('div', { class: 'full' }, titulo, lista, btnAgregar),
-    cuentas.length ? h('label', { class: 'switch full' }, fAutoPago, 'Se paga solo ese día (el banco lo cobra automático y se descuenta de la cuenta del pago)') : null,
+    h('div', { class: 'full' }, titulo, lista, btnAgregar,
+      h('div', { class: 'card-sub', style: { marginTop: '6px' } }, 'Si eliges una cuenta o la tarjeta, ese pago se registra solo el día de pago y se descuenta de ahí. Con «La elijo al pagar» lo marcas tú cuando pagues.')),
     h('label', { class: 'switch full' }, fAuto, 'Incluir automáticamente cada mes'),
     field('Pago de tarjeta (solo si este pago es el de una tarjeta: el valor sale de sus compras y cuotas)', fTarjeta, 'full'),
     field('Número de cuenta del proveedor (para copiarlo al pagar)', fCuenta, 'full'),
@@ -88,17 +87,14 @@ function editarPlantilla(p) {
       if (n > 1 && pagos.some((x) => !x.dia)) return 'Escribe el día de cada pago.';
       if (n > 1 && new Set(pagos.map((x) => x.dia)).size !== n) return 'Cada pago del mes debe ser en un día distinto.';
       if (fTarjeta.value && n > 1) return 'El pago de una tarjeta es uno solo al mes.';
-      if (fAutoPago.checked) {
-        if (pagos.some((x) => !x.dia)) return 'Para que se pague solo, escribe el día de cada pago.';
-        if (pagos.some((x) => !cuentas.some((c) => c.id === x.con))) return 'Para que se pague solo, elige en cada pago la cuenta de la que sale.';
-      }
+      if (pagos.some((x) => x.con && !x.dia)) return 'Si el pago se hace solo con una cuenta o la tarjeta, escribe su día.';
       const orden = [...pagos].sort((a, b) => (a.dia || 0) - (b.dia || 0));
       const nueva = { ...p, concepto: fConcepto.value.trim(), monto: orden[0].monto, dia: orden[0].dia || null, categoria: fCat.value, centro: fCentro.value, cuenta: fCuenta.value, tarjeta: fTarjeta.value };
       delete nueva.dias;
       if (n > 1 || orden.some((x) => x.con)) nueva.pagos = orden.map((x) => ({ dia: x.dia, monto: x.monto, ...(x.con ? { con: x.con } : {}) })); else delete nueva.pagos;
       if (!nueva.tarjeta) delete nueva.tarjeta;
-      if (fAutoPago.checked) nueva.autoPago = true; else delete nueva.autoPago;
-      nueva.auto = fAuto.checked || !!nueva.autoPago; // con pago automático el pago se incluye solo cada mes
+      delete nueva.autoPago;
+      nueva.auto = fAuto.checked || orden.some((x) => x.con); // los pagos con cuenta o tarjeta se incluyen solos cada mes
       if (!nueva.auto) delete nueva.auto;
       savePlantilla(nueva);
       hooks.rerender();
@@ -220,7 +216,7 @@ export function renderRecurrentes(root) {
           multi && k === 0 ? `Se paga ${dias.length} veces al mes` : null,
           k === 0 ? (categoria(pl.categoria)?.nombre || pl.categoria) : pl.concepto,
           conTxt(pl, k) ? 'con ' + conTxt(pl, k) : null,
-          pl.autoPago ? 'se paga solo' : pl.auto ? 'automático' : null,
+          conPago(pl, k) ? 'se paga solo' : pl.auto ? 'automático' : null,
         ].filter(Boolean).join(' · '))),
       h('div', { class: 'acct' }, cu
         ? [h('span', {}, `${cu.proveedor} · ${cu.referencia}`), h('button', { class: 'btn ghost sm', title: 'Copiar número de cuenta', 'aria-label': 'Copiar número de cuenta ' + cu.referencia, onclick: () => copiar(cu.referencia) }, '⧉')]
