@@ -189,6 +189,11 @@ function renderBanner() {
 
 function render() {
   if (sincronizarAutomaticos()) save();
+  if (state.avisoPagoAuto) {
+    const lista = state.avisoPagoAuto;
+    state.avisoPagoAuto = null;
+    toast('Pago automático: ' + lista.map((x) => `${x.concepto} ${money(x.monto)}${x.gmf ? ` + ${money(x.gmf)} de 4x1000` : ''} de ${x.cuenta}`).join(' · '));
+  }
   if (state.avisoAuto) {
     const { n, por } = state.avisoAuto;
     state.avisoAuto = null;

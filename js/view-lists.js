@@ -36,18 +36,22 @@ function editarPlantilla(p) {
   const fCentro = select(centroOpts(), p.centro);
   const fTarjeta = select([{ value: '', label: 'No es pago de tarjeta' }, ...state.data.tarjetas.map((x) => ({ value: x.id, label: x.nombre }))], p.tarjeta || '');
   const fAuto = h('input', { type: 'checkbox', checked: !!p.auto });
+  const fAutoPago = select([{ value: '', label: 'No: lo marco pagado yo cuando pago' }, ...state.data.cuentasDinero.map((c) => ({ value: c.id, label: `Sí: se paga solo el día de pago, desde ${c.nombre}` }))], p.autoPago || '');
   const fCuenta = select([{ value: '', label: 'Sin cuenta asociada' }, ...state.data.cuentas.map((c) => ({ value: c.id, label: `${c.proveedor} · ${c.referencia}` }))], p.cuenta || '');
   modal(nuevo ? 'Nuevo pago recurrente' : 'Editar pago recurrente', [
     field('Concepto', fConcepto, 'full'), field('Monto estimado', fMonto), field('Día de pago (opcional)', fDia),
     field('Categoría', fCat), field('Centro', fCentro), field('Cuenta para pagar', fCuenta, 'full'), field('Pago de tarjeta (el monto sale de las compras y cuotas)', fTarjeta, 'full'),
     h('label', { class: 'switch full' }, fAuto, 'Incluir automáticamente cada mes (como los créditos)'),
+    state.data.cuentasDinero.length ? field('Pago automático (para cobros que el banco hace solo, como la cuota de manejo)', fAutoPago, 'full') : null,
   ], {
     onSave: () => {
       if (!fConcepto.value.trim()) return 'Escribe el concepto.';
       if (!fMonto.getValue()) return 'Escribe el monto estimado.';
       const nueva = { ...p, concepto: fConcepto.value.trim(), monto: fMonto.getValue(), dia: Number(fDia.value) || null, categoria: fCat.value, centro: fCentro.value, cuenta: fCuenta.value, tarjeta: fTarjeta.value };
       if (!nueva.tarjeta) delete nueva.tarjeta;
-      nueva.auto = fAuto.checked;
+      if (fAutoPago.value && !nueva.dia) return 'Para el pago automático escribe el día de pago.';
+      if (fAutoPago.value) nueva.autoPago = fAutoPago.value; else delete nueva.autoPago;
+      nueva.auto = fAuto.checked || !!nueva.autoPago; // con pago automático el pago se incluye solo cada mes
       if (!nueva.auto) delete nueva.auto;
       savePlantilla(nueva);
       hooks.rerender();
@@ -148,7 +152,7 @@ export function renderRecurrentes(root) {
       : h('span', { class: 'muted' }, 'No incluido');
     return h('div', { class: 'rec-row' + (inst ? '' : ' off') },
       chk,
-      h('div', { class: 'nm' }, pl.concepto, h('small', {}, (categoria(pl.categoria)?.nombre || pl.categoria) + (pl.auto ? ' · automático' : ''))),
+      h('div', { class: 'nm' }, pl.concepto, h('small', {}, (categoria(pl.categoria)?.nombre || pl.categoria) + (pl.autoPago ? ' · se paga solo' : pl.auto ? ' · automático' : ''))),
       h('div', { class: 'acct' }, cu
         ? [h('span', {}, `${cu.proveedor} · ${cu.referencia}`), h('button', { class: 'btn ghost sm', title: 'Copiar número de cuenta', 'aria-label': 'Copiar número de cuenta ' + cu.referencia, onclick: () => copiar(cu.referencia) }, '⧉')]
         : h('span', { class: 'muted' }, '—')),

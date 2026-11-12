@@ -230,6 +230,16 @@ function migrate(d) {
     d.config.migraciones.push('auto-ingresos-2026-11');
     cambio = true;
   }
+  if (!d.config.migraciones.includes('cuota-manejo-bancolombia-2026-11')) {
+    // La cuota de manejo de Bancolombia ($15.900) se cobra sola el 12 de cada mes: queda como pago recurrente con pago automático desde esa cuenta.
+    const cuenta = d.cuentasDinero.find((c) => /bancolombia/i.test(c.nombre));
+    if (cuenta && !d.plantillas.some((p) => p.id === 'p-cuota-manejo-bancolombia')) {
+      if (!d.categorias.some((c) => c.id === 'bancario')) d.categorias.push({ id: 'bancario', nombre: 'Comisiones bancarias', tipo: 'recurrente' });
+      d.plantillas.push({ id: 'p-cuota-manejo-bancolombia', concepto: 'Cuota de manejo Bancolombia', monto: 15900, dia: 12, categoria: 'bancario', centro: 'hogar', cuenta: '', auto: true, autoPago: cuenta.id });
+    }
+    d.config.migraciones.push('cuota-manejo-bancolombia-2026-11');
+    cambio = true;
+  }
   if (!d.config.migraciones.includes('gmf-bancolombia-2026-11')) {
     // Bancolombia cobra el 4x1000: desde ahora los pagos NUEVOS que salen de ella se descuentan con ese cobro (lo anterior no cambia).
     for (const c of d.cuentasDinero) if (/bancolombia/i.test(c.nombre) && c.gmf == null) c.gmf = true;
@@ -774,6 +784,18 @@ export function sincronizarAutomaticos() {
       cambio = true;
     }
   }
+  // Pagos recurrentes con pago automático (p. ej. cuotas de manejo): llegado el día, quedan pagados y salen de su cuenta. Una sola vez: si los
+  // devuelves a pendiente, no se vuelven a pagar solos.
+  const pagadosSolos = [];
+  for (const m of D.movimientos) {
+    if (m.estado !== 'pendiente' || !m.plantillaId || m.autoPagoHecho || m.fecha > hoy) continue;
+    const p = D.plantillas.find((x) => x.id === m.plantillaId);
+    if (!p || !p.autoPago || !D.cuentasDinero.some((c) => c.id === p.autoPago)) continue;
+    updateMov(m.id, { estado: 'pagado', hora: '', cuentaId: p.autoPago, yaEnSaldo: undefined, autoPagoHecho: true });
+    pagadosSolos.push({ concepto: m.concepto, monto: m.monto, gmf: gmfDe(m), cuenta: cuentaDinero(p.autoPago).nombre });
+    cambio = true;
+  }
+  if (pagadosSolos.length) state.avisoPagoAuto = pagadosSolos;
   if (sincronizarGastosReales()) cambio = true;
   if (crearCuotasAddi()) cambio = true;
   // Pagos hechos (desde `conciliarDesde`) que quedaron sin cuenta: se descuentan solos de la cuenta sugerida. Nada que pulsar.
